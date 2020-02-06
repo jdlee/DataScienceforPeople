@@ -1,0 +1,179 @@
+---
+title: "ggplot2 basics"
+author: "John D. Lee"
+date: "2/2/2020"
+output:
+  html_notebook
+---
+
+This code provides a high level overview of ggplot, with examples of:
+
+* mapping and setting aesthetic properties
+
+* local and global mapping of aesthetic properties and overlaying summary data
+
+* building a plot by adding layers including, sina plot, statistical models and faceting
+
+* ordering facets to make differences clearer
+
+
+
+```{r, load_packages, echo=FALSE}
+library(tidyverse) # For ggplot, dplyr, tidyr...
+library(skimr) # For quick review of data
+library(ggforce) # For sina plots
+library(lme4) # For the sleep study data
+
+set.seed(888)
+
+```
+
+
+## skimr, head, and tail to review the data
+
+```{r review_data}
+
+sleep.df = sleepstudy # Read data from package
+
+skim(sleep.df) # Summarizes dataframe
+
+head(sleep.df) # First rows of dataframe
+tail(sleep.df) # Last rows of dataframe
+
+```
+
+## Simple scatterplot: Mapping variables to aesthetic properties of geometric elements
+```{r simple_scatter}
+
+ggplot(data = sleep.df, mapping = aes(x = Days, y = Reaction)) + 
+  geom_point()
+
+```
+
+
+## Simple scatterplot: Setting aesthetic properties
+A common error is to map rather than set a color to a geom.  These graphs show what happens.
+```{r set_properties}
+
+ggplot(data = sleep.df, mapping = aes(x = Days, y = Reaction)) + 
+  geom_point(colour = "darkblue") 
+
+ggplot(data = sleep.df, mapping = aes(x = Days, y = Reaction, colour = "darkblue")) + 
+  geom_point() 
+
+```
+
+
+## Simple scatterplot: Layering geometric elements
+
+Note that each layer is plotted on top of the previous layers. Here the violin plot lies beneath the sina plot.
+
+```{r sina_layer}
+
+ggplot(data = sleep.df, mapping = aes(x = as.factor(Days), y = Reaction)) + 
+  geom_violin(fill= "grey85", colour = "grey85") +
+  geom_sina(colour = "darkblue", size = .7)
+
+```
+
+
+## Simple scatterplot: Local and global mapping
+
+Use global mapping to minimize typing, ease revisions, and minimize confusing ambiguity.
+
+Local mapping also makes it possible to add points from another data set.
+
+```{r mapping_local_global}
+
+## Global
+ggplot(data = sleep.df, mapping = aes(x = as.factor(Days), y = Reaction)) + 
+  geom_violin(fill= "grey85", colour = "grey85") +
+  geom_sina(colour = "darkblue", size = .7)
+
+## Local
+ggplot(data = sleep.df) + 
+  geom_violin(mapping = aes(x = as.factor(Days), y = Reaction), fill= "grey85", colour = "grey85") +
+  geom_sina(mapping = aes(x = as.factor(Days), y = Reaction), colour = "darkblue", size = .7)
+
+## Local mapping to overlay data
+m.sleep.df = sleep.df %>% 
+  group_by(Days) %>% 
+  summarise(m.reaction = mean(Reaction))
+
+ggplot(data = sleep.df, mapping = aes(x = as.factor(Days), y = Reaction)) + 
+  geom_violin(fill= "grey85", colour = "grey85") +
+  geom_sina(colour = "darkblue", size = .7) +
+  geom_point(data = m.sleep.df, aes(y = m.reaction), size = 3)
+
+```
+
+
+## Grouped data with linear regression: Slopes and intercepts both vary across people
+
+Simply adding a layer calculates a regression line. When the data area grouped a line is calculated for each group.
+
+Note the use of "group" to identify data that should be plotted as a line.
+
+A common error is failing to identify the groups that define the lines.
+```{r scatterplot_lm}
+
+ggplot(sleep.df, aes(x = Days, y = Reaction, group = Subject)) + 
+  geom_line(alpha = .33) +
+  geom_smooth(method = "lm", se = FALSE, size = .8)
+
+
+# What happens when you don't identify the groups?
+ggplot(sleep.df, aes(Days, Reaction)) +
+  geom_line(alpha = .33) 
+
+# What happens when you don't identify the groups?
+ggplot(sleep.df, aes(Days, Reaction)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE)
+```
+
+
+## Faceted scatterplot: Small multiples to show individual responses
+
+facet_grid adds a different sort of layer that creates a graph for each combination of data defined by the grid variables, in this case "Subject"
+```{r facet_scatterplot_loess, fig.height=3.25, fig.width=10.25}
+
+ggplot(data = sleep.df, mapping = aes(x = Days, y = Reaction)) + 
+  geom_point() +
+  facet_grid(.~Subject)
+
+```
+
+
+## Faceted Scatterplot with Loess Fit: A layer of loess fits shows a linear model doesn't fit all participants{.smaller}
+```{r Scatterplot_loes, fig.height=3.25, fig.width=10.25}
+
+ggplot(sleep.df, aes(Days, Reaction)) + 
+  geom_point() +
+  geom_smooth(method = "loess") +
+  facet_grid(.~Subject)
+```
+
+
+## Faceted scatterplot with linear regression: A linear model shows slopes and intercepts differ{.smaller}
+```{r facet_scatterplot_lm, fig.height=3.25, fig.width=10.25}
+
+ggplot(sleep.df, aes(Days, Reaction)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  facet_grid(.~Subject)
+```
+
+
+## Faceted scatterplot with linear regression: Subjects ordered by mean reaction time
+```{r facet_scatterplot_lm_reordered, warnings=FALSE, fig.height=3.25, fig.width=10.25}
+
+ggplot(sleep.df, aes(Days, Reaction)) + 
+  geom_point() +
+  geom_smooth(method = "lm") +
+  facet_grid(.~reorder(x = Subject, X = Reaction, FUN = mean)) +
+  scale_x_continuous(breaks = c(2, 4, 6, 8)) +
+  labs(title = "Sleep deprevation slows reaction time",
+       subtitle = "Individual participants ordered by mean reaction time",
+       y = "Reaction time (s)", x = "Days into experiment")
+```

@@ -1,0 +1,250 @@
+---
+title: "Exploratory data analysis with ggplot and dplyr"
+date: "2/7/2020"
+output:
+  html_notebook
+---
+
+This demo provides an overview of ggplot for exploratory data analysis, including:
+
+* reading csv files
+
+* assertions to check data
+
+* select and transform data
+
+* single dimensional distributions (e.g., histograms)
+
+* two-dimensional distributions (e.g., scatterplots) 
+
+* scatterplot matrices
+
+* parallel  coordinate plot
+
+
+Bonus: reading multiple files
+
+```{r load_packages, echo=FALSE}
+library(tidyverse) # For ggplot, dplyr, tidyr...
+library(skimr) # For quick review of data
+library(assertr) # For checking data complies with expecations
+library(ggforce) # For SPLOM and sina plots
+
+set.seed(888) # To ensure consistent results from non-deterministic procedures
+rm(list=ls()) # Removes all variables
+
+```
+
+
+## Read and skim data
+```{r review_data}
+wine.df = read.csv("winequality-red.csv")
+
+skim(wine.df)
+
+head(wine.df)
+
+tail(wine.df)
+
+```
+## Assertions to check data
+
+For more information see: https://docs.ropensci.org/assertr/
+
+Assertions allow you to check whether the data comply with what you expect. Expectations can include falling with range of permissible values, absence of missing values, absence of extreme outliers.
+
+One of the most useful features of the assertr package is the abiltiy to identify outliers using the Mahalanobis distance. This distance measure indicates rows that have a combination of points that puts it more than N median absolute deviations from the other points. Median absolute deviaions are a robust version of standard deviations and so large values indicate rows that are very different than the others.
+
+```{r assertions}
+
+error.df = wine.df %>%
+  chain_start %>%
+  assert(in_set(1, 2, 3, 4, 5, 6, 7, 8), quality) %>% # Wine quality ratings must be between 1 and 8
+  assert_rows(num_row_NAs, within_bounds(0, 1), everything()) %>% # At most one NA in a row
+  verify(fixed.acidity > 0 & fixed.acidity < 14) %>% # Acidity is between 1 and 10
+  insist_rows(maha_dist, within_n_mads(8), everything()) %>% # Number of median absolute deviations
+  chain_end(error_fun = error_df_return) 
+error.df
+
+
+wine_checked.df = wine.df %>% rowid_to_column("index")
+
+wine_checked.df = left_join(wine_checked.df, error.df, by = "index") %>% 
+  mutate(error = !is.na(verb))
+
+ggplot(wine_checked.df, aes(quality, chlorides, colour = error)) +
+  geom_point() +
+  scale_color_manual(values = c("grey50", "red"))
+
+```
+
+
+# Select and transform variables
+
+```{r select_transform}
+
+wine.df = wine.df %>% select(-chlorides) # Selects a subset of variables (columns)
+
+wine.df = wine.df %>% filter(fixed.acidity<12) # Filters a subset of observations (rows) 
+
+```
+
+
+##  Histograms
+
+Be sure to vary the binwidth or the number of bins. Data you might think are continuous might be somewhat discrete.
+
+```{r histogram}
+
+ggplot(wine.df, aes(quality)) +
+  geom_histogram()
+
+ggplot(data = wine.df, mapping = aes(x = volatile.acidity )) +
+  geom_histogram()
+
+ggplot(data = wine.df, mapping = aes(x = volatile.acidity )) +
+  geom_histogram(bins = 120)
+
+ggplot(wine.df, aes(volatile.acidity )) +
+  geom_histogram(bins = 120)
+
+```
+
+## Scatterplot
+
+```{r scatterplot}
+
+ggplot(data = wine.df, mapping = aes(x = volatile.acidity, y = quality)) +
+  geom_point()
+
+ggplot(data = wine.df, mapping = aes(x = volatile.acidity, y = quality)) +
+  geom_point() +
+  geom_smooth() 
+
+ggplot(data = wine.df, mapping = aes(x = volatile.acidity, y = quality)) +
+  geom_point() +
+  geom_smooth(colour = "grey70") + 
+  geom_smooth(method = "lm", se = FALSE) 
+
+```
+
+
+## Scatterplot matrix
+https://www.data-imaginist.com/2019/a-flurry-of-facets/
+
+```{r scatterplotmatrix}
+
+ggplot(wine.df, aes(x = .panel_x, y = .panel_y)) +
+  geom_point(size = .1, position = 'auto') + #1
+  geom_autodensity() + #2
+  geom_density2d(colour = "grey70") + #3
+  facet_matrix(vars(fixed.acidity:quality), 
+               layer.diag = 2, layer.upper = 3, 
+               grid.y.diag = FALSE) +
+  theme_minimal()
+
+
+ggplot(wine_checked.df, aes(x = .panel_x, y = .panel_y)) +
+  geom_point(aes(color = error), size = .1, position = 'auto') + #1
+  geom_autodensity() + #2
+  geom_density2d(colour = "grey70") + #3
+  facet_matrix(vars(fixed.acidity:quality), 
+               layer.diag = 2, layer.upper = 3, 
+               grid.y.diag = FALSE) +
+  scale_color_manual(values = c("grey50", "red"), ) +
+  theme_minimal()
+
+ggplot(wine.df, aes(x = .panel_x, y = .panel_y)) +
+  geom_point(size = .1, position = 'auto') + #1
+  geom_autodensity() + #2
+  geom_density2d(colour = "grey70") + #3
+  facet_matrix(vars(fixed.acidity:citric.acid), 
+               layer.diag = 2, layer.upper = 3, 
+               grid.y.diag = FALSE) +
+  theme_minimal()
+
+```
+
+## Parallel coordinate plot
+
+```{r parallel_coordplot}
+
+long.wine.df = wine.df %>% mutate(id = row_number()) %>% 
+  pivot_longer(fixed.acidity:quality, names_to = "variables", values_to = "values")
+
+scaled.long.wine.df = long.wine.df %>% group_by(variables) %>% mutate(s.values = scale(values))
+
+
+ggplot(scaled.long.wine.df, aes(variables, s.values)) +
+  geom_line(aes(group = id), size = .1, alpha =.2) +
+  coord_flip()
+```
+
+## Multiple histograms and sina plots
+
+```{r multidistribution}
+
+ggplot(long.wine.df, aes(values)) +
+  geom_histogram(bins = 75) +
+  facet_wrap(~variables, nrow = 8, scales = "free")
+
+
+ggplot(scaled.long.wine.df, aes(variables, s.values)) +
+  geom_sina(size = .01, alpha = .5) +
+  coord_flip()
+
+```
+
+
+# Bonus
+
+
+## Reading multiple files
+https://catalog.data.gov/dataset?tags=baby-names
+
+Data for most popular baby names is contained in csv files, one per year for the last 140 years.
+
+```{r read_multiplefiles}
+
+## Identify files containing data
+data_directory = "names"
+
+data_files = list.files(data_directory, full.names = TRUE)
+
+names(data_files) = list.files(data_directory) # Adds names to character vector
+
+## Use map command to apply function "read_csv" to list of files
+names.df = map_df(data_files, read_csv,
+                   .id = "yob", quote = "",
+                   col_names = c("name", "gender", "babies"),
+                   col_types = list(col_character(), 
+                                    col_factor(levels = c("M", "F")),
+                                    col_integer()))
+
+## Clean date variable 
+names.df = names.df %>% mutate(yob = str_replace(yob, "yob", "")) %>% 
+  mutate(yob = str_replace(yob, ".txt", "")) %>% 
+  mutate(yob = as.numeric(yob)) 
+  
+## Calculate percent of babies for each name
+names.df = names.df %>% 
+  group_by(yob) %>% 
+  mutate(total_babies = sum(babies)) %>% 
+  ungroup() %>% 
+  mutate(percent = babies/total_babies)
+
+## Plot trend over time
+ggplot(names.df, 
+       aes(yob, percent, group = interaction(name, gender))) +
+  geom_line(size = .3, alpha = .4) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(title = "Popular names have become less dominant",
+       caption = "data source: https://catalog.data.gov/dataset?tags=baby-names",
+       x = "Year of birth",
+       y = "Percent of babies with each name") +
+  theme_bw()
+
+```
+
+
+

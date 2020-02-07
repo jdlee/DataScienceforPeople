@@ -37,8 +37,18 @@ rm(list=ls()) # Removes all variables
 
 
 ## Read and skim data
+One of the more tricky things can be identifying where the file is that you are reading.  It is best to create a directory that contains only your data and a directory that contains your notebooks. When you do that you will need to specify the path to your data.  The command below uses the ".." to indicate that the data are outside the directly where the notebook is. This can be confusing and the following post helps explain: http://jenrichmond.rbind.io/post/how-to-use-the-here-package/
+
+The following works for a directory structure that looks like this:
+DemosDataScienceforPeople
+  /notebooks
+  /data
+
+
+
 ```{r review_data}
-wine.df = read.csv("winequality-red.csv")
+wine.df = read.csv("../data/winequality-red.csv")
+getwd()
 
 skim(wine.df)
 
@@ -167,6 +177,7 @@ ggplot(wine.df, aes(x = .panel_x, y = .panel_y)) +
 
 ## Parallel coordinate plot
 
+A parallel coordinate plot highlights the distribution of the variables and trends across variables.  
 ```{r parallel_coordplot}
 
 long.wine.df = wine.df %>% mutate(id = row_number()) %>% 
@@ -174,9 +185,8 @@ long.wine.df = wine.df %>% mutate(id = row_number()) %>%
 
 scaled.long.wine.df = long.wine.df %>% group_by(variables) %>% mutate(s.values = scale(values))
 
-
 ggplot(scaled.long.wine.df, aes(variables, s.values)) +
-  geom_line(aes(group = id), size = .1, alpha =.2) +
+  geom_line(aes(group = id), size = .1, alpha = .2) +
   coord_flip()
 ```
 
@@ -196,18 +206,29 @@ ggplot(scaled.long.wine.df, aes(variables, s.values)) +
 ```
 
 
+## Save the data
+It is important to keep the original raw data unchanged and to save any modified data to a new file.
+
+```{r savedata}
+
+wine.df %>% write_csv(path= "../data/refined_wine.csv")
+
+```
+
+
 # Bonus
 
+Not needed for the assignment, but might be useful in the future
 
 ## Reading multiple files
 https://catalog.data.gov/dataset?tags=baby-names
 
-Data for most popular baby names is contained in csv files, one per year for the last 140 years.
+Reading data from many files is a common challenge. How to read multiple files efficiently is demonstrate with the US baby names data. Data for most popular baby names is contained in csv files, one per year for the last 140 years.
 
 ```{r read_multiplefiles}
 
 ## Identify files containing data
-data_directory = "names"
+data_directory = "../data/names"
 
 data_files = list.files(data_directory, full.names = TRUE)
 
@@ -221,17 +242,19 @@ names.df = map_df(data_files, read_csv,
                                     col_factor(levels = c("M", "F")),
                                     col_integer()))
 
-## Clean date variable 
+## Clean the date variable 
 names.df = names.df %>% mutate(yob = str_replace(yob, "yob", "")) %>% 
   mutate(yob = str_replace(yob, ".txt", "")) %>% 
   mutate(yob = as.numeric(yob)) 
   
+
 ## Calculate percent of babies for each name
 names.df = names.df %>% 
   group_by(yob) %>% 
   mutate(total_babies = sum(babies)) %>% 
   ungroup() %>% 
   mutate(percent = babies/total_babies)
+
 
 ## Plot trend over time
 ggplot(names.df, 

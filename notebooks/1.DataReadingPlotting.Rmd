@@ -31,7 +31,7 @@ library(assertr) # For checking data complies with expecations
 library(ggforce) # For SPLOM and sina plots
 
 set.seed(888) # To ensure consistent results from non-deterministic procedures
-rm(list=ls()) # Removes all variables
+rm(list = ls()) # Removes all variables
 
 ```
 
@@ -69,7 +69,7 @@ One of the most useful features of the assertr package is the abiltiy to identif
 
 error.df = wine.df %>%
   chain_start %>%
-  assert(in_set(1, 2, 3, 4, 5, 6, 7, 8), quality) %>% # Wine quality ratings must be between 1 and 8
+  assert(in_set(1, 2, 3, 4, 5, 6, 7, 8), quality) %>% # Wine quality must be between 1 and 8
   assert_rows(num_row_NAs, within_bounds(0, 1), everything()) %>% # At most one NA in a row
   verify(fixed.acidity > 0 & fixed.acidity < 14) %>% # Acidity is between 1 and 10
   insist_rows(maha_dist, within_n_mads(8), everything()) %>% # Number of median absolute deviations
@@ -145,7 +145,28 @@ https://www.data-imaginist.com/2019/a-flurry-of-facets/
 ```{r scatterplotmatrix}
 
 ggplot(wine.df, aes(x = .panel_x, y = .panel_y)) +
-  geom_point(size = .1, position = 'auto') + #1
+  geom_point(size = .1) + #1
+  geom_autodensity() + #2
+  geom_density2d(colour = "grey70") + #3
+  facet_matrix(vars(fixed.acidity:citric.acid), 
+               layer.diag = 2, layer.upper = 3, 
+               grid.y.diag = FALSE) +
+  theme_minimal()
+
+
+ggplot(wine_checked.df, aes(x = .panel_x, y = .panel_y)) +
+  geom_point(aes(color = error), size = .1) + #1
+  geom_autodensity() + #2
+  geom_density2d(colour = "grey70") + #3
+  facet_matrix(vars(fixed.acidity:citric.acid), 
+               layer.diag = 2, layer.upper = 3, 
+               grid.y.diag = FALSE) +
+  scale_color_manual(values = c("grey50", "red")) +
+  theme_minimal()
+
+
+ggplot(wine.df, aes(x = .panel_x, y = .panel_y)) +
+  geom_point(size = .1) + #1
   geom_autodensity() + #2
   geom_density2d(colour = "grey70") + #3
   facet_matrix(vars(fixed.acidity:quality), 
@@ -155,23 +176,15 @@ ggplot(wine.df, aes(x = .panel_x, y = .panel_y)) +
 
 
 ggplot(wine_checked.df, aes(x = .panel_x, y = .panel_y)) +
-  geom_point(aes(color = error), size = .1, position = 'auto') + #1
+  geom_point(aes(color = error), size = .1) + #1
   geom_autodensity() + #2
   geom_density2d(colour = "grey70") + #3
   facet_matrix(vars(fixed.acidity:quality), 
                layer.diag = 2, layer.upper = 3, 
                grid.y.diag = FALSE) +
-  scale_color_manual(values = c("grey50", "red"), ) +
+  scale_color_manual(values = c("grey50", "red")) +
   theme_minimal()
 
-ggplot(wine.df, aes(x = .panel_x, y = .panel_y)) +
-  geom_point(size = .1, position = 'auto') + #1
-  geom_autodensity() + #2
-  geom_density2d(colour = "grey70") + #3
-  facet_matrix(vars(fixed.acidity:citric.acid), 
-               layer.diag = 2, layer.upper = 3, 
-               grid.y.diag = FALSE) +
-  theme_minimal()
 
 ```
 
@@ -180,13 +193,28 @@ ggplot(wine.df, aes(x = .panel_x, y = .panel_y)) +
 A parallel coordinate plot highlights the distribution of the variables and trends across variables.  
 ```{r parallel_coordplot}
 
+## Add indicator of high-quality wines
+wine.df = wine.df %>%  
+  mutate(hi_quality = if_else(quality> 6, "hi", "lo"))
+
+## Create "long" version of data with column of variable names and one for variable values
 long.wine.df = wine.df %>% mutate(id = row_number()) %>% 
   pivot_longer(fixed.acidity:quality, names_to = "variables", values_to = "values")
 
-scaled.long.wine.df = long.wine.df %>% group_by(variables) %>% mutate(s.values = scale(values))
 
+## Scaled values to z-scores
+scaled.long.wine.df = long.wine.df %>% group_by(variables) %>% 
+  mutate(s.values = scale(values))
+
+## Highlighting cases of interest can reveal patterns
 ggplot(scaled.long.wine.df, aes(variables, s.values)) +
   geom_line(aes(group = id), size = .1, alpha = .2) +
+  coord_flip()
+
+## Highlighting cases of interest can reveal patterns
+ggplot(scaled.long.wine.df, aes(variables, s.values)) +
+  geom_line(aes(group = id, colour = hi_quality), size = .1, alpha = .2) +
+  scale_color_manual(values = c("red", "grey50")) +
   coord_flip()
 ```
 
@@ -211,7 +239,7 @@ It is important to keep the original raw data unchanged and to save any modified
 
 ```{r savedata}
 
-wine.df %>% write_csv(path= "../data/refined_wine.csv")
+wine.df %>% write_csv(path = "../data/refined_wine.csv")
 
 ```
 

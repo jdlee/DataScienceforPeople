@@ -42,7 +42,7 @@ tail(sleep.df) # Last rows of dataframe
 
 ```
 
-## Simple scatterplot: Mapping variables to aesthetic properties of geometric elements
+## Simple scatterplot: Map variables to aesthetic properties of geometric elements
 ```{r simple_scatter}
 
 ggplot(data = sleep.df, mapping = aes(x = Days, y = Reaction)) + 
@@ -71,7 +71,7 @@ Note that each layer is plotted on top of the previous layers. Here the violin p
 ```{r sina_layer}
 
 ggplot(data = sleep.df, mapping = aes(x = as.factor(Days), y = Reaction)) + 
-  geom_violin(fill= "grey85", colour = "grey85") +
+  geom_violin(fill= "grey75", colour = "grey75") +
   geom_sina(colour = "darkblue", size = .7)
 
 ```
@@ -101,7 +101,7 @@ m.sleep.df = sleep.df %>%
   summarise(m.reaction = mean(Reaction))
 
 ggplot(data = sleep.df, mapping = aes(x = as.factor(Days), y = Reaction)) + 
-  geom_violin(fill= "grey85", colour = "grey85") +
+  geom_violin(fill = "grey85", colour = "grey85") +
   geom_sina(colour = "darkblue", size = .7) +
   geom_point(data = m.sleep.df, aes(y = m.reaction), size = 3)
 

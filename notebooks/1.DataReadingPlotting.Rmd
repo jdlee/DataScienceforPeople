@@ -57,6 +57,7 @@ head(wine.df)
 tail(wine.df)
 
 ```
+
 ## Assertions to check data
 
 For more information see: https://docs.ropensci.org/assertr/

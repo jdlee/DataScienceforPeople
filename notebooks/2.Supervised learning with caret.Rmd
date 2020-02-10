@@ -14,7 +14,8 @@ library(ggforce)
 library(caret) # Tools and common interface to many supervised learning algorithms
 library(patchwork) # For combining multiple plots
 library(plotROC)
-library(FFTrees)
+library(plotROC)
+library(pROC)
 
 set.seed(888) # To ensure consistent results from non-deterministic procedures
 rm(list = ls()) # Removes all variables
@@ -81,8 +82,8 @@ inTrain = createDataPartition(wine.df$goodwine, p = 3/4, list = FALSE)
 trainDescr = wine.df %>% slice(inTrain) %>% select(-goodwine)
 testDescr = wine.df %>% slice(-inTrain) %>% select(-goodwine)
 
-trainClass = wine.df %>% slice(inTrain) %>% select(goodwine) %>% as.matrix()
-testClass = wine.df %>% slice(-inTrain) %>% select(goodwine) %>% as.vector()
+trainClass = wine.df %>% slice(inTrain) %>% select(goodwine) %>% as.matrix() %>% as.factor()
+testClass = wine.df %>% slice(-inTrain) %>% select(goodwine) %>% as.matrix() %>% as.factor()
 
 ## Proportion of good and bad cases should be the same in testing and training
 # Ideally the classes should be balanced
@@ -314,7 +315,7 @@ confusionMatrix(glm.pred, testClass)
 
 svm.pred = predict(svm.fit, testScaled)
 
-confusionMatrix(svm.pred, testClass$goodwine)
+confusionMatrix(svm.pred, testClass)
 
 ```
 
@@ -324,7 +325,7 @@ confusionMatrix(svm.pred, testClass$goodwine)
 
 xgb.pred = predict(xgb.fit, testScaled)
 
-confusionMatrix(xgb.pred, testClass$goodwine)
+confusionMatrix(xgb.pred, testClass)
 
 ```
 
@@ -345,29 +346,36 @@ bwplot(mod.resamps, metric = "ROC")
 ## Assess performance (xgb): ROC plot
 ```{r assess_ROC, warning=FALSE, echo=FALSE, message= FALSE}
 
-library(plotROC)
-library(pROC)
-
+## Use model to generate predictions
 xgb.pred = predict(xgb.fit, testScaled, type = "prob")
 glm.pred = predict(glm.fit, testScaled, type = "prob")
 
-xgb.roc = roc(predictor = xgb.pred$good, 
-              response = testClass$goodwine, 
+## Add prediction and observed to test predictors
+predicted.wine.df = quality.wine.df %>% slice(-inTrain) %>% 
+  cbind(glm.pred.good = glm.pred$good) %>% 
+  cbind(xgb.pred.good = xgb.pred$good) %>% 
+  cbind(obs = testClass)
+
+## Calculate ROC coordinates and area under curve (AUC)
+glm.roc = roc(predictor = predicted.wine.df$glm.pred, 
+              response = predicted.wine.df$obs, 
               AUC = TRUE, ci = TRUE)
 
-glm.roc = roc(predictor = glm.pred$good, 
-              response = testClass$goodwine, 
+xgb.roc = roc(predictor = predicted.wine.df$xgb.pred, 
+              response = predicted.wine.df$obs, 
               AUC = TRUE, ci = TRUE)
 
-xgb.roc.df = data.frame(obs = xgb.roc$original.response, pred = xgb.roc$predictor)
-glm.roc.df = data.frame(obs = glm.roc$original.response, pred = glm.roc$predictor)
 
+glm.roc$auc
+glm.roc$ci
+
+
+## Plot ROC
 xgb_glm.roc.plot = 
-ggplot() + 
-  geom_roc(data = xgb.roc.df, aes(d = obs, m = pred),
-           labels = FALSE, linealpha = .8) + # Labels show the predictor value
-  geom_roc(data = glm.roc.df, aes(d = obs, m = pred),
-           labels = FALSE, linealpha = .5) + # Labels show the predictor value
+ggplot(data = predicted.wine.df, aes(d = obs, m = glm.pred.good)) + 
+  geom_roc(labels = FALSE, linealpha = .5, pointalpha = .5) + # Labels show the predictor value
+  geom_roc(aes(d = obs, m = xgb.pred.good),
+           labels = FALSE, linealpha = .8, pointalpha = .8) + # Labels show the predictor value
    annotate("text", x = .5, y = .475, hjust = 0,
            label = paste("AUC(xbg) =", round(xgb.roc$auc, 2))) +
      annotate("text", x = .5, y = .375, hjust = 0,
@@ -383,14 +391,11 @@ ggsave("xgb_glm-roc.png", xgb_glm.roc.plot, width = 5, height = 4.5)
 ```
 
 
-## xgboost predictions
+## Comparing xgboost predictions with observed ratings of wine quality
 ```{r xgb-pred-plot}
 
-predicted.df = cbind(xgb.pred, quality.wine.df[-inTrain, ])
-
-
 predicted_wine.plot = 
-  ggplot(predicted.df, aes(as.factor(quality), good, colour = goodwine)) + 
+  ggplot(predicted.wine.df, aes(as.factor(quality), xgb.pred.good, colour = goodwine)) + 
   geom_sina(size = .5) +
   labs(title = "Prediction of good and bad wines", 
        subtitle = "Extreme gradient boosting predictions (xgboost)",

@@ -4,4 +4,4 @@
 .Ruserdata
 .txt
 .csv
-/data/*
+data/**

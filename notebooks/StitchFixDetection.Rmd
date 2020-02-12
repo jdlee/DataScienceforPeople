@@ -1,0 +1,48 @@
+---
+title: "Stitch Fix Outfit Detection"
+output: html_notebook
+---
+
+
+```{r}
+
+library(caret)
+library(plotROC)
+library(pROC)
+
+set.seed(888) # To ensure consistent results from non-deterministic procedures
+rm(list = ls()) # Removes all variables
+
+```
+
+
+```{r outfit_roc}
+
+SF.df = data_frame(obs = c(1, 1, 1, 1, 1, 
+                           0, 0, 0, 0, 0), 
+                  pred = c(.8, .3, .9, .8, .7, 
+                           .1, .2, .7, .4, .5 ))
+
+threshold = .5
+confusionMatrix(data = as.factor(SF.df$pred > threshold), 
+                reference = as.factor(SF.df$obs == 1), 
+                positive = "TRUE")
+
+
+SF.roc = roc(predictor = SF.df$pred, 
+              response = SF.df$obs, 
+              AUC = TRUE, ci = TRUE)
+SF.roc$auc
+
+
+
+ggplot(data = SF.df, aes(d = obs, m = pred)) + 
+  geom_abline(colour = "grey60") +
+  geom_roc(linealpha = .5, pointalpha = .5, labels = TRUE) +
+  coord_equal() +
+  labs(title = "Detection performance of Stitch Fix outfit",
+       subtitle = "True positive = correct detection of new outfit")
+
+```
+
+

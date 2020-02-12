@@ -14,7 +14,6 @@ library(ggforce)
 library(caret) # Tools and common interface to many supervised learning algorithms
 library(patchwork) # For combining multiple plots
 library(plotROC)
-library(plotROC)
 library(pROC)
 
 set.seed(888) # To ensure consistent results from non-deterministic procedures
@@ -54,7 +53,8 @@ tail(wine.df)
 
 ```
 
-### Define class variable--Good or Bad wine 
+
+## Define class variable--Good or Bad wine 
 ```{r define-class, echo = TRUE, warning=FALSE, message=FALSE, out.width="60%"}
 
 quality.wine.df = wine.df %>% mutate(goodwine = if_else(quality > 5, "good", "bad")) %>% 
@@ -68,9 +68,8 @@ ggplot(quality.wine.df, aes(goodwine, quality, colour = goodwine, fill = goodwin
 ```
 
 
-
 ## Partition data into training and testing
-```{r partition, echo = TRUE}
+```{r partition}
 
 wine.df = quality.wine.df %>% select(-quality) # Remove numeric indicator of quality
 
@@ -111,7 +110,7 @@ testClass %>% table() %>% prop.table() %>% round(3)*100
 
   *  ``preProcess`` supports other preprocessing methods, such as PCA and ICA
 
-```{r pre-process, echo = TRUE, cache=FALSE, warning=FALSE, message=FALSE}
+```{r pre-process, cache=FALSE, warning=FALSE, message=FALSE}
 
 ## Trans.mod is a transformation model that is trained and the applied to the data
 Trans.mod = preProcess(trainDescr, method = c("center", "scale")) 
@@ -122,7 +121,7 @@ testScaled = predict(Trans.mod, testDescr)
 
 
 ## Pre-process Data: Normalization
-```{r pre-process-plot, echo = FALSE, warning = FALSE}
+```{r pre-process-plot, warning = FALSE}
 
 raw.plot = ggplot(trainDescr, aes(alcohol)) + geom_histogram() +
   labs(title = "Original")
@@ -131,11 +130,6 @@ scaled.plot = ggplot(trainScaled, aes(alcohol)) + geom_histogram() +
   labs(title = "Scaled")
 
 (raw.plot / scaled.plot) # Using patchwork package
-
-# library(ggpubr)
-# ggarrange(raw.plot, scaled.plot,
-#           labels = c("Original", "Normalized"),
-#           nrow=2, ncol = 1, align = "v")
 
 ```
 
@@ -158,7 +152,7 @@ scaled.plot = ggplot(trainScaled, aes(alcohol)) + geom_histogram() +
 
 
 ## Define training parameters: ``trainControl``
-```{r tune, echo=TRUE}
+```{r tune}
 
 train.control = trainControl(method = "repeatedcv", 
                               number = 10, repeats = 3, # number: number of folds
@@ -228,7 +222,7 @@ glm.fit
 
 * C = 1000 "hard margin" tends to be sensitive to individual data points and is prone to over fitting
 
-```{r train_svm, cache=TRUE,  echo=TRUE, message=FALSE, warning=FALSE}
+```{r train_svm, cache=TRUE, message=FALSE, warning=FALSE}
 
 grid = expand.grid(C = c(.1, .2, .4, 1, 2, 4))
 
@@ -286,7 +280,8 @@ Trees are built in sequence to address the errors (residuals) of the previous tr
 
 -- 108 different model combinations each trained and tested 10X3 times
 
-```{r train_xgb, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
+
+```{r train_xgb, cache=TRUE, warning=FALSE, message=FALSE}
 
 xgb.fit = train(x = trainScaled, y = trainClass,
   method = "xgbTree", metric = "ROC",
@@ -301,7 +296,7 @@ plot(xgb.fit)
 ## Assess performance: Confusion matrix (glm)
 Use trained model to predict on the4 unseen test data
 
-```{r assess-glm,  echo=TRUE}
+```{r assess-glm}
 
 glm.pred = predict(glm.fit, testScaled) 
 
@@ -311,7 +306,7 @@ confusionMatrix(glm.pred, testClass)
 
 
 ## Assess performance: Confusion matrix (svm)
-```{r assess-svm,  echo=TRUE}
+```{r assess-svm}
 
 svm.pred = predict(svm.fit, testScaled)
 
@@ -321,7 +316,7 @@ confusionMatrix(svm.pred, testClass)
 
 
 ## Assess Performance: Confusion matrix (xgb)
-```{r assess-xgb,  echo=TRUE}
+```{r assess-xgb}
 
 xgb.pred = predict(xgb.fit, testScaled)
 
@@ -331,7 +326,7 @@ confusionMatrix(xgb.pred, testClass)
 
 
 ## Compare models
-```{r compare_boxplot, cache=TRUE, echo=TRUE}
+```{r compare_boxplot, cache=TRUE}
 
 mod.resamps = resamples(list(glm = glm.fit, svm = svm.fit, xgb = xgb.fit))
 
@@ -344,7 +339,7 @@ bwplot(mod.resamps, metric = "ROC")
 
 
 ## Assess performance (xgb): ROC plot
-```{r assess_ROC, warning=FALSE, echo=FALSE, message= FALSE}
+```{r assess_ROC, warning=FALSE, message= FALSE}
 
 ## Use model to generate predictions
 xgb.pred = predict(xgb.fit, testScaled, type = "prob")
@@ -365,7 +360,6 @@ xgb.roc = roc(predictor = predicted.wine.df$xgb.pred,
               response = predicted.wine.df$obs, 
               AUC = TRUE, ci = TRUE)
 
-
 glm.roc$auc
 glm.roc$ci
 
@@ -373,6 +367,7 @@ glm.roc$ci
 ## Plot ROC
 xgb_glm.roc.plot = 
 ggplot(data = predicted.wine.df, aes(d = obs, m = glm.pred.good)) + 
+  geom_abline(colour = "grey60") +
   geom_roc(labels = FALSE, linealpha = .5, pointalpha = .5) + # Labels show the predictor value
   geom_roc(aes(d = obs, m = xgb.pred.good),
            labels = FALSE, linealpha = .8, pointalpha = .8) + # Labels show the predictor value
@@ -382,11 +377,13 @@ ggplot(data = predicted.wine.df, aes(d = obs, m = glm.pred.good)) +
            label = paste("AUC(glm) =", round(glm.roc$auc, 2))) +
   labs(title = "Prediction of good and bad wines", 
        subtitle = "Extreme gradient boosting predictions (xgboost)") +
-  coord_fixed(ratio = 1) +
+  coord_equal() +
   style_roc() 
   
 xgb_glm.roc.plot
 ggsave("xgb_glm-roc.png", xgb_glm.roc.plot, width = 5, height = 4.5)
+
+
 
 ```
 

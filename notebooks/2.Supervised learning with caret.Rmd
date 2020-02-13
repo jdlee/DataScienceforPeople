@@ -43,7 +43,9 @@ rm(list = ls()) # Removes all variables
 ## Read, clean, transform, and visualize data
 ```{r review_data}
 
-wine.df = read.csv("../data/winequality-red.csv")
+wine.df = read_csv("../data/winequality-red.csv")
+colnames(wine.df) <- make.names(colnames(wine.df), unique=TRUE) # Ensures names are valid and don't contain spaces
+
 
 skim(wine.df)
 
@@ -373,7 +375,7 @@ ggplot(data = predicted.wine.df, aes(d = obs, m = glm.pred.good)) +
            labels = FALSE, linealpha = .8, pointalpha = .8) + # Labels show the predictor value
    annotate("text", x = .5, y = .475, hjust = 0,
            label = paste("AUC(xbg) =", round(xgb.roc$auc, 2))) +
-     annotate("text", x = .5, y = .375, hjust = 0,
+   annotate("text", x = .5, y = .375, hjust = 0,
            label = paste("AUC(glm) =", round(glm.roc$auc, 2))) +
   labs(title = "Prediction of good and bad wines", 
        subtitle = "Extreme gradient boosting predictions (xgboost)") +

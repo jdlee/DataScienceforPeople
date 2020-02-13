@@ -52,7 +52,9 @@ DemosDataScienceforPeople
 
 
 ```{r review_data}
-wine.df = read.csv("../data/winequality-red.csv")
+wine.df = read_csv("../data/winequality-red.csv")
+colnames(wine.df) <- make.names(colnames(wine.df), unique=TRUE) # Ensures names are valid and don't contain spaces
+
 getwd()
 
 skim(wine.df)
@@ -70,6 +72,8 @@ For more information see: https://docs.ropensci.org/assertr/
 Assertions allow you to check whether the data comply with what you expect. Expectations can include falling with range of permissible values, absence of missing values, absence of extreme outliers.
 
 One of the most useful features of the assertr package is the abiltiy to identify outliers using the Mahalanobis distance. This distance measure indicates rows that have a combination of points that puts it more than N median absolute deviations from the other points. Median absolute deviaions are a robust version of standard deviations and so large values indicate rows that are very different than the others.
+
+The "everything()" selection method is one of many methods from dplyr for selecting variables. For a summary of other methods search RStudio help for select_helpers. For example, "contains("acid") would select all variables with "acid" in the name. You can also use something like this:"fixed.acidity:chlorides, density".This selects columns between "fixed.acidity" and "chlorides", as well as "density"
 
 ```{r assertions}
 

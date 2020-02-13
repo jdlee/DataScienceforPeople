@@ -117,14 +117,17 @@ Note the use of "group" to identify data that should be plotted as a line.
 A common error is failing to identify the groups that define the lines.
 ```{r scatterplot_lm}
 
-ggplot(sleep.df, aes(x = Days, y = Reaction, group = Subject)) + 
-  geom_line(alpha = .33) +
-  geom_smooth(method = "lm", se = FALSE, size = .8)
-
+ggplot(sleep.df, aes(Days, Reaction, group = Subject)) +
+  geom_line(alpha = .33) 
 
 # What happens when you don't identify the groups?
 ggplot(sleep.df, aes(Days, Reaction)) +
   geom_line(alpha = .33) 
+
+
+ggplot(sleep.df, aes(x = Days, y = Reaction, group = Subject)) + 
+  geom_line(alpha = .33) +
+  geom_smooth(method = "lm", se = FALSE, size = .8)
 
 # What happens when you don't identify the groups?
 ggplot(sleep.df, aes(Days, Reaction)) +

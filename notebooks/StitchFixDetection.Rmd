@@ -39,6 +39,8 @@ SF.roc$auc
 ggplot(data = SF.df, aes(d = obs, m = pred)) + 
   geom_abline(colour = "grey60") +
   geom_roc(linealpha = .5, pointalpha = .5, labels = TRUE) +
+  annotate("text", x = .5, y = .375, hjust = 0,
+           label = paste("AUC =", round(SF.roc$auc, 2))) +
   coord_equal() +
   labs(title = "Detection performance of Stitch Fix outfit",
        subtitle = "True positive = correct detection of new outfit")

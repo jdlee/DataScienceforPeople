@@ -1,0 +1,205 @@
+---
+title: "Cluster analysis with clvalid"
+author: "John D. Lee"
+date: "2/14/20"
+output: html_notebook
+---
+
+
+```{r}
+
+library(kernlab)
+library(dbscan)
+library(diceR) # For cluster analysis and ensemble cluster
+#library(clValid) # For cluster analysis and validation measures
+#library(pander) # For tables
+library(ggpubr)
+library(tidyverse)
+#library(checkpoint)
+library(patchwork) # For arranging multiple plots
+
+set.seed(888) # To ensure consistent results from non-deterministic procedures
+rm(list = ls()) # Removes all variables
+
+```
+
+
+
+
+## Common methods for clustering applied to a difficult dataset 
+Spectral Clustering uses the top k eigenvectors derived from a materix defined by distance between points. Uses a standard clustering technique to cluster the resulting eigenvector matrixes.
+
+```{r, common_cluster_methods}
+data(spirals)
+spirals.df = spirals %>% as.tibble()
+names(spirals.df) = c("x", "y")
+
+## k means 
+spirals.df$km.cluster  = kmeans(as.matrix(spirals[, 1:2]), centers = 2)$cluster %>%
+  as.factor()
+
+kmeans.plot = 
+  ggplot(spirals.df, aes(x, y, colour = km.cluster)) + 
+  geom_point() + 
+  labs(title = "k-means", x = "", y = "") +
+  theme_bw() + 
+  theme(legend.position = "none") 
+
+## Hierarchical 
+spirals.df$h.cluster = as.factor(cutree(hclust(dist(as.matrix(spirals[, 1:2])), method = "single"), k = 2))
+hc.plot =
+  ggplot(spirals.df, aes(x, y, colour = h.cluster)) + 
+  geom_point() +
+  labs(title = "Hierarchical", x = "", y = "") +
+  theme_bw() + 
+  theme(legend.position = "none") 
+
+## Hierarchical DBSCAN
+spirals.df$hdb.cluster  = hdbscan(as.matrix(spirals[, 1:2]), minPts = 10)$cluster %>% as.factor()
+hdbscan.plot = 
+  ggplot(spirals.df, aes(x, y, colour = hdb.cluster)) + 
+  geom_point() +
+  labs(title = "Hierarchical DBSCAN", x = "", y = "") +
+  theme_bw() + 
+  theme(legend.position = "none") 
+
+## DBSCAN
+spirals.df$db.cluster  = dbscan(as.matrix(spirals[, 1:2]), eps = .15)$cluster %>% as.factor()
+dbscan.plot = 
+  ggplot(spirals.df, aes(x, y, colour = db.cluster)) + 
+  geom_point() +
+  labs(title = "DBSCAN", x = "", y = "") +
+  theme_bw() + 
+  theme(legend.position = "none") 
+
+## Spectral cluster
+spirals.df$s.cluster = specc(as.matrix(spirals[, 1:2]), centers=2)@.Data %>% as.factor()
+spec.plot =
+  ggplot(spirals.df, aes(x, y, colour = s.cluster)) + 
+  geom_point() +
+  labs(title = "Spectral", x = "", y = "") +
+  theme_bw() + 
+  theme(legend.position = "none") 
+
+
+## Combine plots with patchwork package
+# https://patchwork.data-imaginist.com/articles/guides/layout.html
+
+combined.plot = kmeans.plot + hc.plot + hdbscan.plot + dbscan.plot + spec.plot +
+  plot_layout(ncol = 3, nrow = 2)
+combined.plot
+
+```
+
+## Steps in unsupervised learning
+ Scaling 
+ Distance
+ Method
+ Validation: Internal, external
+ 
+## Scaling using caret
+
+```{r scale_variables}
+
+
+```
+
+ 
+
+## Apply multiple clustering methods, different numbers of clusters, and evaluate
+The iris data have a ground truth number of clusters and cluster definitions and both internal and external validity can be calculated. 
+
+```{r, cluster_iris_data}
+
+iris.df =  mutate(Species = as.factor(Species))
+
+iris.dice = dice(as.matrix(iris.df[, -5]), nk = 4, reps = 5, algorithms = c("hdbscan", "diana"),
+            cons.funs = c("kmodes", "majority"))
+
+knitr::kable(head(iris.dice$clusters))
+
+
+
+# Creates a 4-D matrix 1: item, 2: repetitions, 3: algorithm type 4: number of clusters fit 
+CC = consensus_cluster(as.matrix(iris.df[, -5]),
+                        nk = 2:4, 
+                        p.item = 1, # proportion of items used in subsampling
+                        reps = 1, # number of subsamples
+                        distance = "euclidian",
+                        algorithms = c("hdbscan", "km"))
+
+
+                        algorithms = c("km", # "pam", 
+                                       "hc", #"diana",
+                                       "hdbscan",
+                                       "sc",
+                                       "gmm" 
+                                     #  "nmf"
+                                       )_
+
+## Plot solution from all methods
+cluster_assignment.df = cbind(iris.df[, -5],  as.tibble(CC))
+cluster_assignment.df = cluster_assignment.df %>% 
+  gather(key = "rep.method.num", value = "cluster", -Sepal.Width, -Sepal.Length, -Petal.Length, -Petal.Width) %>% 
+  separate(rep.method.num, into = c("rep", "method", "number"), sep = "\\.") %>% 
+  mutate(number = as.numeric(number), cluster = as.factor(cluster))
+
+ggplot(cluster_assignment.df, aes(Sepal.Width, Petal.Length, colour = cluster)) + 
+  geom_point(size = 1) +
+  facet_grid(number~method) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ccomp <- consensus_evaluate(iris.df[, -5], CC,
+                            ref.cl = as.integer(iris.df$Species),
+                            plot = FALSE)
+
+
+## Internal validity
+pandoc.table(ccomp$ii$`2`, split.tables = 120,
+             caption = "Internal Indices for k = 2")
+
+## External validity: Null if no ground truth clusters
+pandoc.table(ccomp$ei$`3`, split.tables = 100,
+             caption = "Internal Indices for k = 3")
+
+
+## Internal validity
+ii_test.df = ccomp$ii %>% as.data.frame() %>% # Extracts intrernal validity measures
+  gather(key = metric, value = value, -contains("Algorithm")) %>% 
+  separate(metric, c("cluster", "metric"), sep = "\\.") %>% 
+  mutate(algorithm = X2.Algorithms) %>% 
+  select(-contains("X")) %>% # Remove redundant indicator of algorithm
+  select(algorithm, everything()) # Moves algorithm to the front of data frame
+
+## Plot evaluation metrics for all algorithms for three cluster sizes
+ggplot(ii_test.df, 
+       aes(algorithm, value, colour = cluster, group = cluster)) +
+  geom_point() +
+  geom_line() + 
+  coord_flip() + 
+  facet_wrap(~metric, ncol = 3, scales = "free") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+
+## External validity
+ei_test.df = ccomp$ei %>% as.data.frame() %>% # Extracts intrernal validity measures
+  gather(key = metric, value = value, -contains("Algorithm")) %>% 
+  separate(metric, c("cluster", "metric"), 3) %>% # Splits at third character
+  select(-cluster) %>% 
+  rename(algorithm = X3.Algorithms)
+
+## Plot evaluation metrics for all algorithms for three cluster sizes
+ggplot(ei_test.df, 
+       aes(algorithm, value, group = 1)) +
+  geom_point() +
+  geom_line() + 
+  coord_flip() + 
+  facet_wrap(~metric, ncol = 3, scales = "free") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+  
+```
+
+

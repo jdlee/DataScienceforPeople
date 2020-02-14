@@ -5,8 +5,9 @@ output: html_notebook
 
 
 ```{r}
-
+library(tidyverse)
 library(caret)
+library(patchwork)
 library(plotROC)
 library(pROC)
 
@@ -18,10 +19,10 @@ rm(list = ls()) # Removes all variables
 
 ```{r outfit_roc}
 
-SF.df = data_frame(obs = c(1, 1, 1, 1, 1, 
-                           0, 0, 0, 0, 0), 
-                  pred = c(.8, .3, .9, .8, .7, 
-                           .1, .2, .7, .4, .5 ))
+SF.df = data_frame(obs = c(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 
+                           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), 
+                  pred = c(.9, .8, .3, .9, .8, .7, .8, .8, .4, .9, .6, .7, 
+                           .1, .1, .2, .7, .4, .5, .3, .1, .2, .6, .4, .4 ))
 
 threshold = .5
 confusionMatrix(data = as.factor(SF.df$pred > threshold), 
@@ -35,15 +36,94 @@ SF.roc = roc(predictor = SF.df$pred,
 SF.roc$auc
 
 
+tp_threshold = count(SF.df %>% filter(obs == 1 & pred >= threshold) %>% select(obs)) /
+  count(SF.df %>% filter(obs == 1) %>% select(obs))
 
-ggplot(data = SF.df, aes(d = obs, m = pred)) + 
+fp_threshold = count(SF.df %>% filter(obs == 0 & pred >= threshold) %>% select(obs)) /
+  count(SF.df %>% filter(obs == 0) %>% select(obs))
+
+tp.plot = ggplot(SF.df %>% filter(obs == 1),
+                 aes(x = pred)) + 
+  annotate("rect", xmin = Inf, xmax = .5, ymin = -Inf, ymax = Inf, colour = "grey80", alpha = .1) +
+  geom_vline(xintercept = threshold, colour = "darkgrey") +
+  geom_hline(yintercept = tp_threshold$n, colour = "darkred") +
+  geom_dotplot(binwidth = .1, dotsize = .5, stackgroups = TRUE, 
+               method = "dotdensity", binpositions = "all") +
+  stat_ecdf(geom = "step") +
+  coord_equal() +
+  scale_x_reverse() +
+  lims(x = c(1, 0), y = c(0, 1)) +
+  labs(x = "threshold", y = "true positive fraction") +
+  theme(plot.margin = margin(0, 0, 0, 0, "cm"))
+tp.plot
+
+fp.plot = ggplot(SF.df %>% filter(obs == 0),
+                 aes(x = pred)) + 
+  annotate("rect", xmin = Inf, xmax = .5, ymin = -Inf, ymax = Inf, colour = "grey80", alpha = .1) +
+  geom_vline(xintercept = threshold, colour = "darkgrey") +
+  geom_hline(yintercept = fp_threshold$n, colour = "darkred") +
+  geom_dotplot(binwidth = .1, dotsize = .5, stackgroups = TRUE, fill = "white", binpositions = "all") +
+  stat_ecdf(geom = "step") +
+  coord_equal() +
+  scale_x_reverse() +
+  coord_flip() +
+  lims(x = c(1, 0), y = c(0, 1)) +
+  labs(y = "false positive fraction", x = "threshold") +
+  theme(plot.margin = margin(0, 0, .1,.1, "cm"))
+fp.plot
+
+roc.plot = 
+  ggplot(data = SF.df, aes(d = obs, m = pred)) + 
   geom_abline(colour = "grey60") +
+  geom_hline(yintercept = tp_threshold$n, colour = "darkred") +
+  geom_vline(xintercept = fp_threshold$n, colour = "darkred") +
   geom_roc(linealpha = .5, pointalpha = .5, labels = TRUE) +
+  annotate("point", y = tp_threshold$n, x = fp_threshold$n, colour = "darkred", size = 4) +
   annotate("text", x = .5, y = .375, hjust = 0,
            label = paste("AUC =", round(SF.roc$auc, 2))) +
   coord_equal() +
-  labs(title = "Detection performance of Stitch Fix outfit",
-       subtitle = "True positive = correct detection of new outfit")
+  labs(x = "", y = "") +
+  theme(plot.margin = margin(0, 0, 0,0, "cm"))
+  #labs(title = "Detection performance of Stitch Fix outfit",
+    #   subtitle = "True positive = correct detection of new outfit")
+roc.plot
+
+tp.plot+roc.plot + plot_spacer() + fp.plot +
+plot_layout(ncol = 2)
+
+
+```
+
+```{r}
+library('igraph')
+library(ggraph)
+
+
+## Network specification
+nodes <- c('a','b','c','d')
+x <- c(0,1,2,3) # Position information
+y <- c(0,1,2,3)
+from <- c('a','b','c')
+to <- c('b','c','d')
+NodeList <- data.frame(nodes, x ,y)
+EdgeList <- data.frame(from, to)
+
+## Create network object
+test.net = graph_from_data_frame(vertices = NodeList, d= EdgeList, directed = FALSE)
+
+plot(test.net)
+
+## Specify node layout for ggraph
+layout.df = data.frame(x1 = x, y1 = y)
+
+## Plot network
+ggraph(test.net, layout = layout.df) +
+  geom_edge_link(alpha = 0.25) +
+  geom_node_point() +
+  geom_node_label(aes(label = nodes))
+
+
+
 
 ```
 

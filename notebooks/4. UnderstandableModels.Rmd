@@ -1,0 +1,75 @@
+---
+title: "Model understanding and interpretation"
+output: html_notebook
+---
+
+---
+title: "Making models understandable and using understandable models"
+author: "John D. Lee"
+date: "2/17/20"
+output: html_notebook
+---
+
+
+```{r}
+
+library(tidyverse)
+library(skimr)
+library(ggforce)
+library(caret) # Tools and common interface to many supervised learning algorithms
+library(patchwork) # For combining multiple plots
+library(plotROC)
+library(FFTrees)
+
+set.seed(888) # To ensure consistent results from non-deterministic procedures
+rm(list = ls()) # Removes all variables
+
+```
+
+
+## Assess Variable Importance: glm and xgb
+```{r assess-var-glm, fig.width=5, fig.height=5}
+
+  plot(varImp(glm.fit, scale = TRUE), main = "glm")
+
+  plot(varImp(xgb.fit, scale = TRUE), main = "xgb")
+
+```
+
+
+## An understandable model: Fast and frugal decision trees
+```{r, train_fft, message=FALSE, echo=TRUE}
+
+library(FFTrees)
+
+wine.df =  read.csv("../data/winequality-red.csv")
+wine.df = wine.df %>% mutate(goodwine = if_else(quality > 5, TRUE, FALSE)) %>%
+  select(-quality)
+
+inTrain = createDataPartition(wine.df$goodwine, p = 3/4, list = FALSE)
+train.wine.df = wine.df[inTrain, ] 
+test.wine.df = wine.df[-inTrain, ]
+
+fft.fit = FFTrees(formula = goodwine~., data = train.wine.df, do.comp = FALSE)
+
+plot(fft.fit)
+
+```
+
+
+## Compare understandable (fft) and sophisticated (xgb) 
+```{r compare_fft_xgb, warning=FALSE,message=FALSE, echo=FALSE}
+
+fft.pred = predict(fft.fit, newdata = test.wine.df, type = "prob")
+fft.roc = roc(predictor = fft.pred[, 2], response = test.wine.df$goodwine,
+              AUC = TRUE, ci = TRUE)
+
+fft.roc.df = data.frame(obs = fft.roc$original.response, pred = fft.roc$predictor)
+
+xgb.roc.plot +
+  geom_roc(data = fft.roc.df, color = "blue", labels = FALSE) +
+  annotate("text", x = .5, y = .4, color = "blue", hjust = 0,
+           label = paste("AUC(fft) =", round(fft.roc$auc, 2)))
+
+```
+

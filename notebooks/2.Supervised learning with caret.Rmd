@@ -119,16 +119,11 @@ Trans.mod = preProcess(trainDescr, method = c("center", "scale"))
 trainScaled = predict(Trans.mod, trainDescr)
 testScaled = predict(Trans.mod, testDescr)
 
-```
-
-
-## Pre-process Data: Normalization
-```{r pre-process-plot, warning = FALSE}
-
-raw.plot = ggplot(trainDescr, aes(alcohol)) + geom_histogram() +
+## Plot transformed data
+raw.plot = ggplot(trainDescr, aes(density)) + geom_histogram(bins = 60) +
   labs(title = "Original")
 
-scaled.plot = ggplot(trainScaled, aes(alcohol)) + geom_histogram() +
+scaled.plot = ggplot(trainScaled, aes(density)) + geom_histogram(bins = 60) +
   labs(title = "Scaled")
 
 (raw.plot / scaled.plot) # Using patchwork package
@@ -194,12 +189,11 @@ train.control = trainControl(method = "repeatedcv",
 * Include the ``train.control`` object specified earlier
 
 
-
-Train models and tune hyperparameters: Logistic regression
+## Train models and tune hyperparameters: Logistic regression
 
 * Logistic regression has no tuning parameters
 
-* 10-fold repeated (3 times) cross-validation occurs once 
+* 10-fold repeated 3 times cross-validation occurs once 
 
 * Produces a total of 30 instances of model fitting and testing
 
@@ -336,7 +330,6 @@ mod.resamps = resamples(list(glm = glm.fit, svm = svm.fit, xgb = xgb.fit))
 
 bwplot(mod.resamps, metric = "ROC")
 
-
 ```
 
 
@@ -384,7 +377,6 @@ ggplot(data = predicted.wine.df, aes(d = obs, m = glm.pred.good)) +
   
 xgb_glm.roc.plot
 ggsave("xgb_glm-roc.png", xgb_glm.roc.plot, width = 5, height = 4.5)
-
 
 
 ```

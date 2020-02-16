@@ -17,36 +17,55 @@ rm(list = ls()) # Removes all variables
 ```
 
 
-```{r outfit_roc}
+```{r read_data}
 
 SF.df = data_frame(obs = c(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 
                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), 
                   pred = c(.9, .8, .3, .9, .8, .7, .8, .8, .4, .9, .6, .7, 
                            .1, .1, .2, .7, .4, .5, .3, .1, .2, .6, .4, .4 ))
 
+```
+
+```{r calculate_fpFn}
+
 threshold = .5
 confusionMatrix(data = as.factor(SF.df$pred > threshold), 
                 reference = as.factor(SF.df$obs == 1), 
                 positive = "TRUE")
-
-
+  
 SF.roc = roc(predictor = SF.df$pred, 
               response = SF.df$obs, 
               AUC = TRUE, ci = TRUE)
 SF.roc$auc
 
+print(SF.roc$auc)
 
-tp_threshold = count(SF.df %>% filter(obs == 1 & pred >= threshold) %>% select(obs)) /
-  count(SF.df %>% filter(obs == 1) %>% select(obs))
+  
+## Add threshold to all rows
+tp_fp_threshold.df = SF.df %>% rowwise() %>% 
+  mutate(threshold = list(seq(from = 0, to = 1, by = .1))) %>%
+  unnest(cols = c(threshold))
 
-fp_threshold = count(SF.df %>% filter(obs == 0 & pred >= threshold) %>% select(obs)) /
-  count(SF.df %>% filter(obs == 0) %>% select(obs))
+## Calculate true positive and false positve fraction for all thresholds
+tp_fp_threshold.df = tp_fp_threshold.df %>% group_by(threshold) %>% 
+  summarise(total_obs1 = sum(obs == 1),
+            total_obs0 = sum(obs == 0),
+            tp = sum(obs == 1 & pred >= threshold)/total_obs1,
+            fp = sum(obs == 0 & pred >= threshold)/total_obs0)
+
+```
+
+
+```{r outfit_roc}
+
+tp_fp_threshold.df = tp_fp_threshold.df %>% filter(near(threshold, .3))
 
 tp.plot = ggplot(SF.df %>% filter(obs == 1),
                  aes(x = pred)) + 
-  annotate("rect", xmin = Inf, xmax = .5, ymin = -Inf, ymax = Inf, colour = "grey80", alpha = .1) +
-  geom_vline(xintercept = threshold, colour = "darkgrey") +
-  geom_hline(yintercept = tp_threshold$n, colour = "darkred") +
+  annotate("rect", xmin = Inf, xmax =  tp_fp_threshold.df$threshold, ymin = -Inf, ymax = Inf, 
+           colour = "grey80", alpha = .1) +
+  geom_vline(xintercept = tp_fp_threshold.df$threshold, colour = "darkgrey") +
+  geom_hline(yintercept = tp_fp_threshold.df$tp, colour = "darkred") +
   geom_dotplot(binwidth = .1, dotsize = .5, stackgroups = TRUE, 
                method = "dotdensity", binpositions = "all") +
   stat_ecdf(geom = "step") +
@@ -59,9 +78,10 @@ tp.plot
 
 fp.plot = ggplot(SF.df %>% filter(obs == 0),
                  aes(x = pred)) + 
-  annotate("rect", xmin = Inf, xmax = .5, ymin = -Inf, ymax = Inf, colour = "grey80", alpha = .1) +
-  geom_vline(xintercept = threshold, colour = "darkgrey") +
-  geom_hline(yintercept = fp_threshold$n, colour = "darkred") +
+  annotate("rect", xmin = Inf, xmax =  tp_fp_threshold.df$threshold, ymin = -Inf, ymax = Inf, 
+           colour = "grey80", alpha = .1) +
+  geom_vline(xintercept = tp_fp_threshold.df$threshold, colour = "darkgrey") +
+  geom_hline(yintercept = tp_fp_threshold.df$fp, colour = "darkred") +
   geom_dotplot(binwidth = .1, dotsize = .5, stackgroups = TRUE, fill = "white", binpositions = "all") +
   stat_ecdf(geom = "step") +
   coord_equal() +
@@ -75,10 +95,10 @@ fp.plot
 roc.plot = 
   ggplot(data = SF.df, aes(d = obs, m = pred)) + 
   geom_abline(colour = "grey60") +
-  geom_hline(yintercept = tp_threshold$n, colour = "darkred") +
-  geom_vline(xintercept = fp_threshold$n, colour = "darkred") +
-  geom_roc(linealpha = .5, pointalpha = .5, labels = TRUE) +
-  annotate("point", y = tp_threshold$n, x = fp_threshold$n, colour = "darkred", size = 4) +
+  geom_hline(yintercept = tp_fp_threshold.df$tp, colour = "darkred") +
+  geom_vline(xintercept = tp_fp_threshold.df$fp, colour = "darkred") +
+  geom_roc(linealpha = .5, pointalpha = .5, labels = TRUE, labelsize = 3) +
+  annotate("point", y = tp_fp_threshold.df$tp, x = tp_fp_threshold.df$fp, colour = "darkred", size = 2) +
   annotate("text", x = .5, y = .375, hjust = 0,
            label = paste("AUC =", round(SF.roc$auc, 2))) +
   coord_equal() +
@@ -88,42 +108,41 @@ roc.plot =
     #   subtitle = "True positive = correct detection of new outfit")
 roc.plot
 
-tp.plot+roc.plot + plot_spacer() + fp.plot +
-plot_layout(ncol = 2)
+combined.plot =
+  tp.plot + roc.plot + plot_spacer() + fp.plot +
+  plot_layout(ncol = 2)
+combined.plot
 
 
 ```
 
+
 ```{r}
-library('igraph')
-library(ggraph)
+library(gapminder)
+library(ggplot2)
+library(gganimate)
 
+p <- ggplot(
+  gapminder, 
+  aes(x = gdpPercap, y=lifeExp, size = pop, colour = country)
+) +
+  geom_point(show.legend = FALSE, alpha = 0.7) +
+  scale_color_viridis_d() +
+  scale_size(range = c(2, 12)) +
+  scale_x_log10() +
+  labs(x = "GDP per capita", y = "Life expectancy")
 
-## Network specification
-nodes <- c('a','b','c','d')
-x <- c(0,1,2,3) # Position information
-y <- c(0,1,2,3)
-from <- c('a','b','c')
-to <- c('b','c','d')
-NodeList <- data.frame(nodes, x ,y)
-EdgeList <- data.frame(from, to)
-
-## Create network object
-test.net = graph_from_data_frame(vertices = NodeList, d= EdgeList, directed = FALSE)
-
-plot(test.net)
-
-## Specify node layout for ggraph
-layout.df = data.frame(x1 = x, y1 = y)
-
-## Plot network
-ggraph(test.net, layout = layout.df) +
-  geom_edge_link(alpha = 0.25) +
-  geom_node_point() +
-  geom_node_label(aes(label = nodes))
+p + transition_time(year) +
+  labs(title = "Year: {frame_time}") +
+  shadow_wake(wake_length = 0.2, alpha = FALSE)
 
 
 
+combined.plot +
+  transition_time(threshold)
+
+roc.plot +
+    transition_time(threshold)
 
 ```
 

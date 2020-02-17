@@ -12,22 +12,32 @@ library(caret)
 library(patchwork)
 library(plotROC)
 library(pROC)
+library(ggrepel)
 
 set.seed(888) # To ensure consistent results from non-deterministic procedures
 rm(list = ls()) # Removes all variables
 
 
 ## Read data
-SF.df = data_frame(obs = c(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 
-                           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), 
-                   pred = c(.9, .8, .3, .9, .8, .7, .8, .8, .4, .9, .6, .7, 
-                            .1, .1, .2, .7, .4, .5, .3, .1, .2, .6, .4, .4 ))
+SF.df = read_csv("StitchFix.csv")
+
+    
+# data_frame(obs = c(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 
+#                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), 
+#                    pred = c(.9, .8, .3, .9, .8, .7, .8, .8, .4, .9, .6, .7, 
+#                             .1, .1, .2, .7, .4, .5, .3, .1, .2, .6, .4, .4 ))
 
 ## Calculate AUC
 SF.roc = roc(predictor = SF.df$pred, 
              response = SF.df$obs, 
              AUC = TRUE, ci = TRUE)
 SF.roc$auc
+
+## Calculate the confusion matrix and performance metrics
+# confusionMatrix(data = as.factor(SF.df$pred > threshold), 
+#                 reference = as.factor(SF.df$obs == 1), 
+#                 positive = "TRUE")
+
 
 
 ## Add threshold to all rows
@@ -71,8 +81,25 @@ ui <- fluidPage(
             the true positive fraction for the graph on the left and the false positive fraction for the graph 
             on the bottom.",
             br(), br(),
-            "The ROC curve shows the true positive fraction against the false postive fraction for different thresholds."
+            "The ROC curve shows the true positive fraction against the false postive fraction for different thresholds.",
+            br(), br(),
+            "The data represent students' confidence that the professor was wearing a new Stitch Fix outfit
+            or a ~60-year-old shirt and ~30 year-old sweater. The data suggest the Stitch Fix outfit was 
+            indistinguishable from the old outfit. This could be interpretted as a success for the Stitch Fix 
+            algorithm-assisted stylist who picked the outfit.",
+            br(), br(),br(),
+            
+            strong("Negative case"), 
+            HTML('&nbsp;'),HTML('&nbsp;'),HTML('&nbsp;'),HTML('&nbsp;'),
+            HTML('&nbsp;'),HTML('&nbsp;'),HTML('&nbsp;'),HTML('&nbsp;'),
+            HTML('&nbsp;'),HTML('&nbsp;'),HTML('&nbsp;'),HTML('&nbsp;'),
+            HTML('&nbsp;'),HTML('&nbsp;'),
+            strong("Positive case"),
+            
+            imageOutput("photo")
+            
         ),
+
 
         # Show a ROC plot 
         mainPanel(
@@ -97,6 +124,9 @@ server <- function(input, output) {
             stat_ecdf(geom = "step") +
             geom_dotplot(binwidth = .1, dotsize = .5, stackgroups = TRUE, 
                          method = "dotdensity", binpositions = "all") +
+            geom_label_repel(data = SF.df %>% filter(obs == 1&pred==min(pred)) %>% slice(1), 
+                            aes(pred, y = 0), label = "Incorrectly confident in absence", 
+                            nudge_y = .2) +
             coord_equal() +
             lims(x = c(0, 1), y = c(0, 1)) +
             labs(x = "Strength of evidence", y = "True positive fraction", title = "Positive cases") +
@@ -111,6 +141,9 @@ server <- function(input, output) {
             geom_hline(yintercept = tp_fp.df$fp, colour = "darkred") +
             stat_ecdf(geom = "step") +
             geom_dotplot(binwidth = .1, dotsize = .5, stackgroups = TRUE, fill = "white", binpositions = "all") +
+            geom_label_repel(data = SF.df %>% filter(obs == 1&pred==max(pred)) %>% slice(1), 
+                            aes(pred, y = 0), label = "Incorrectly confident in presence", 
+                            nudge_x = -.2)+
             coord_flip() +
             lims(x = c(0, 1), y = c(0, 1)) +
             labs(x = "Strength of evidence", y = "False positive fraction", title = "Negative cases") +
@@ -133,6 +166,18 @@ server <- function(input, output) {
             plot_layout(ncol = 2)
         combined.plot
     }, height = 700, width = 700 )
+    
+    
+    output$photo <- renderImage({
+        # When input$n is 3, filename is ./images/image3.jpeg
+        filename <- "JDL.jpg"
+        
+        list(src = filename,
+             contentType = 'jpg',
+             width = 400,
+             height = 300)
+        
+    }, deleteFile = FALSE)
 
 }
 

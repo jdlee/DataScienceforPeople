@@ -1,7 +1,7 @@
 ---
 title: "Supervised learning with caret"
 author: "John D. Lee"
-date: "2/10/20"
+date: "2/18/20"
 output: html_notebook
 ---
 
@@ -18,6 +18,7 @@ library(pROC)
 
 set.seed(888) # To ensure consistent results from non-deterministic procedures
 rm(list = ls()) # Removes all variables
+
 
 ```
 
@@ -40,12 +41,14 @@ rm(list = ls()) # Removes all variables
 
 * Compare model performance
 
+
 ## Read, clean, transform, and visualize data
+Many machine learning algorithms fail if the data includes any missing values.  Be sure you review the skim results and remove columns that contain variables that have many missing variables (select) and remove rows that contain missing values (filter).
+
 ```{r review_data}
 
 wine.df = read_csv("../data/winequality-red.csv")
 colnames(wine.df) <- make.names(colnames(wine.df), unique=TRUE) # Ensures names are valid and don't contain spaces
-
 
 skim(wine.df)
 
@@ -98,6 +101,8 @@ testClass %>% table() %>% prop.table() %>% round(3)*100
 
 
 ## Pre-process data: Filter poor predictors, select good predictors, and scale
+This function can has many powerful capabilities, including:
+
 * Eliminate variables that have no variabilty and those that are highly correlated 
 
 * Select highly predictive features
@@ -132,13 +137,13 @@ scaled.plot = ggplot(trainScaled, aes(density)) + geom_histogram(bins = 60) +
 
 
 ## Tune model hyperparameters with cross-validation
-* Used to select best combination of predictors and model parameters
+* Used to select best combination model parameters
 
 * Estimates model performance (e.g., AUC or r-square) for each candidate model
 
-* Uses a random subset of the training data to train the model and a withheld subset to test
+* Uses a subset of the training data to train the model and a withheld subset to test
 
-
+The minimal requirements of this function include:
 * Select cross validation method: 10-fold repeated cross validation is common
 
 * Define hyperparameter selection method: grid search is the simplest approach
@@ -152,11 +157,11 @@ scaled.plot = ggplot(trainScaled, aes(density)) + geom_histogram(bins = 60) +
 ```{r tune}
 
 train.control = trainControl(method = "repeatedcv", 
-                              number = 10, repeats = 3, # number: number of folds
-                              search = "grid", # for tuning hyperparameters
-                              classProbs = TRUE, # return probability of prediction
-                              savePredictions = "final",
-                              summaryFunction = twoClassSummary
+                             number = 10, repeats = 3, # number: number of folds
+                             search = "grid", # for tuning hyperparameters
+                             classProbs = TRUE, # return probability of prediction
+                             savePredictions = "final",
+                             summaryFunction = twoClassSummary
                              )
 
 ```
@@ -274,7 +279,7 @@ Trees are built in sequence to address the errors (residuals) of the previous tr
 
     - subsample (Subsample Percentage) (.50, .75, 1.0)
 
--- 108 different model combinations each trained and tested 10X3 times
+-- 108 different model combinations each trained and tested 10X3 times-->3,240 model fits
 
 
 ```{r train_xgb, cache=TRUE, warning=FALSE, message=FALSE}
@@ -297,6 +302,7 @@ Use trained model to predict on the4 unseen test data
 glm.pred = predict(glm.fit, testScaled) 
 
 confusionMatrix(glm.pred, testClass)
+
 
 ```
 
@@ -322,6 +328,8 @@ confusionMatrix(xgb.pred, testClass)
 
 
 ## Compare models
+This function resamples the 10-fold cross validation outcome for the best model parameters. These measures of model performance should approximate performance of the model on the test data.
+
 ```{r compare_boxplot, cache=TRUE}
 
 mod.resamps = resamples(list(glm = glm.fit, svm = svm.fit, xgb = xgb.fit))
@@ -330,10 +338,14 @@ mod.resamps = resamples(list(glm = glm.fit, svm = svm.fit, xgb = xgb.fit))
 
 bwplot(mod.resamps, metric = "ROC")
 
+
+
 ```
 
 
 ## Assess performance (xgb): ROC plot
+The ROC plot provides a more detailed comparison of models across the of decision thresholds.
+
 ```{r assess_ROC, warning=FALSE, message= FALSE}
 
 ## Use model to generate predictions
@@ -382,7 +394,30 @@ ggsave("xgb_glm-roc.png", xgb_glm.roc.plot, width = 5, height = 4.5)
 ```
 
 
-## Comparing xgboost predictions with observed ratings of wine quality
+## Calibration curve
+```{r}
+
+glm.pred = predict(glm.fit, testScaled, type = "prob")
+svm.pred = predict(svm.fit, testScaled, type = "prob")
+xgb.pred = predict(xgb.fit, testScaled, type = "prob")
+
+results = data.frame(Class = testClass, 
+                     glm = glm.pred$good, 
+                     svm = svm.pred$good,
+                     xgb = xgb.pred$good)
+
+cal_obj <- calibration(testClass ~ glm + svm + xgb,
+                       data = results,
+                       class = "good",
+                       cuts = 10)
+ggplot(cal_obj) +
+  labs(x = "Model probabilty")
+
+```
+
+
+
+## Compare xgboost predictions with observed ratings of wine quality
 ```{r xgb-pred-plot}
 
 predicted_wine.plot = 
@@ -400,5 +435,4 @@ ggsave(filename = "predicted_wine.png", plot = predicted_wine.plot,
        width = 5, height = 4.5)
 
 ```
-
 

@@ -69,7 +69,7 @@ ui <- fluidPage(
                         min = 0,
                         max = 1,
                         value = .5,
-                        step = .1, playButton),
+                        step = .1),
             ## Application description
             "The left plot with the filled circles shows the distribution of positive cases. 
             The lower plot with the open circles shows the distribution of negative cases. 
@@ -100,7 +100,6 @@ ui <- fluidPage(
             
         ),
 
-
         # Show a ROC plot 
         mainPanel(
            plotOutput("ROC_Plot"),
@@ -117,35 +116,38 @@ server <- function(input, output) {
         
         tp.plot = ggplot(SF.df %>% filter(obs == 1),
                          aes(x = pred)) + 
-            annotate("rect", xmin = Inf, xmax =  tp_fp.df$threshold, ymin = -Inf, ymax = Inf, 
+            annotate("rect", xmin = Inf, xmax =  tp_fp.df$threshold, ymin = -Inf, ymax = tp_fp.df$tp, 
                      colour = "grey80", alpha = .2) +
             geom_vline(xintercept = tp_fp.df$threshold, colour = "darkgrey") +
             geom_hline(yintercept = tp_fp.df$tp, colour = "darkred") +
             stat_ecdf(geom = "step") +
             geom_dotplot(binwidth = .1, dotsize = .5, stackgroups = TRUE, 
                          method = "dotdensity", binpositions = "all") +
-            geom_label_repel(data = SF.df %>% filter(obs == 1&pred==min(pred)) %>% slice(1), 
+            geom_label_repel(data = SF.df %>% filter(obs == 1) %>% filter(pred==min(pred)) %>% slice(1), 
                             aes(pred, y = 0), label = "Incorrectly confident in absence", 
                             nudge_y = .2) +
+            lims(y = c(0, 1)) +
+            scale_x_reverse(limits = c(1, 0)) +
             coord_equal() +
-            lims(x = c(0, 1), y = c(0, 1)) +
             labs(x = "Strength of evidence", y = "True positive fraction", title = "Positive cases") +
             theme(plot.margin = margin(0, 0, 0, 0, "cm"))
         
         
         fp.plot = ggplot(SF.df %>% filter(obs == 0),
                          aes(x = pred)) + 
-            annotate("rect", xmin = Inf, xmax =  tp_fp.df$threshold, ymin = -Inf, ymax = Inf, 
+            annotate("rect", xmin = Inf, xmax =  tp_fp.df$threshold, ymin = -Inf, ymax = tp_fp.df$fp, 
                      colour = "grey80", alpha = .2) +
             geom_vline(xintercept = tp_fp.df$threshold, colour = "darkgrey") +
             geom_hline(yintercept = tp_fp.df$fp, colour = "darkred") +
             stat_ecdf(geom = "step") +
             geom_dotplot(binwidth = .1, dotsize = .5, stackgroups = TRUE, fill = "white", binpositions = "all") +
-            geom_label_repel(data = SF.df %>% filter(obs == 1&pred==max(pred)) %>% slice(1), 
+            geom_label_repel(data = SF.df %>% filter(obs == 1) %>% filter(pred==min(pred)) %>% slice(1), 
                             aes(pred, y = 0), label = "Incorrectly confident in presence", 
                             nudge_x = -.2)+
+            lims(y = c(0, 1)) +
+            scale_x_reverse(limits = c(1, 0)) +
+            #coord_equal() +
             coord_flip() +
-            lims(x = c(0, 1), y = c(0, 1)) +
             labs(x = "Strength of evidence", y = "False positive fraction", title = "Negative cases") +
             theme(plot.margin = margin(0, 0, .1, .1, "cm"))
         
@@ -161,10 +163,49 @@ server <- function(input, output) {
             coord_equal() +
             labs(x = "", y = "", title = "ROC Curve") +
             theme(plot.margin = margin(0, 0, 0,0, "cm"))
- 
-        combined.plot = tp.plot + roc.plot + plot_spacer() + fp.plot +
+        
+  ## Calculate confusion matrix plot      
+        confusion_matrix.obj = confusionMatrix(
+            data = as.factor(SF.df$pred > input$threshold), 
+            reference = as.factor(SF.df$obs == 1), 
+            positive = "TRUE")
+        
+        confusion.df = data.frame(confusion_matrix.obj$table)
+        confusion.df$Label = c("TN", "FP", "FN", "TP")
+        
+        confusion.plot = ggplot(confusion.df, 
+                                aes(reorder(Reference, desc(Reference)), Prediction, fill = Freq, label = Freq)) +
+            geom_tile() +
+            geom_label(fill = "lightgrey", nudge_y = -.2, size = 4) +
+            geom_label(aes(label = Label), fill = "lightgrey", nudge_y = .2, size = 4) +
+            labs(x = "Reference") +
+            theme_minimal() +
+            scale_fill_gradient(low = "grey90", high = "grey10") +
+            theme(legend.position = "none") 
+        confusion.plot
+       
+         
+  ## Calculate metrics and tabluate    
+        measure.df = data.frame(Value = confusion_matrix.obj$byClass) %>% 
+            rownames_to_column(var = "Name") %>% 
+            mutate(Value = round(Value, 2)) %>% 
+            slice(1:4) 
+        
+        measure.df$Metric = c("Sensitivity = TP/(TP + FN)", "Specificity = TN/(TN+FP)", 
+                  "Pos Pred Value = TP/(FP+TP)",  "Neg Pred Value = TN/(TN+FN)") 
+        
+        measure.df = measure.df %>% select(Metric, Value)
+
+        tt = ttheme_default(colhead = list(fg_params = list(parse = TRUE)), base_size = 12)
+        roc.table = tableGrob(measure.df, rows = NULL, theme = tt)
+        
+        roc.table = wrap_elements(panel = roc.table)
+        
+        combined.plot = tp.plot + roc.plot +
+            (confusion.plot/roc.table) + fp.plot +
             plot_layout(ncol = 2)
         combined.plot
+        
     }, height = 700, width = 700 )
     
     

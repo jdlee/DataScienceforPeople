@@ -13,6 +13,9 @@ library(patchwork)
 library(plotROC)
 library(pROC)
 library(ggrepel)
+library(grid)
+library(gridExtra)
+library(e1071)
 
 set.seed(888) # To ensure consistent results from non-deterministic procedures
 rm(list = ls()) # Removes all variables

@@ -35,8 +35,6 @@ rm(list = ls()) # Removes all variables
 
 * Tune model hyperparameters with cross validation
 
-* Estimate variable importance 
-
 * Assess predictions and model performance with test data
 
 * Compare model performance
@@ -395,6 +393,8 @@ ggsave("xgb_glm-roc.png", xgb_glm.roc.plot, width = 5, height = 4.5)
 
 
 ## Calibration curve
+
+Calibration or Brier curve show how well th predicted probabilities correspond to the observed probabilities.  A well calibrated model should have predicted probabilities (confidence) that corresponds to the observed probabilty of the predicted class.
 ```{r}
 
 glm.pred = predict(glm.fit, testScaled, type = "prob")
@@ -435,4 +435,3 @@ ggsave(filename = "predicted_wine.png", plot = predicted_wine.plot,
        width = 5, height = 4.5)
 
 ```
-

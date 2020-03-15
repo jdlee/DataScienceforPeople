@@ -1,0 +1,531 @@
+---
+title: "Interpretable models and making models understandable"
+author: "John D. Lee"
+date: "3/14/20"
+output: html_notebook
+---
+
+Creating interpretable models and making models understandable has emerged as an important challenge in developing machine learning models. Several reasons for making models interpretable and understandable include:
+
+* Identify problems with the model that might undermine is generalization
+* Promote acceptance appropriate trust so that people rely on the model appropriately
+* Promote appropriate trust so that people rely on model predictions appropriately
+* Enable the model to be monitored after it is deployed to identify problems of data drift and unexpected edge cases
+* Provide explanation as required by regulations, such as GDPR
+* Uncover problems of fairness and bias  
+
+## Steps in intepretable machine learning
+
+The predictions of machine learning model be understood by people because they intrisically interpretable or because they are made interpretable through post-hoc explanations. Ensemble models that combine predictions across many sub-models, as with random forests, are considered to be black-box models that can not be understood directly and so require post-hoc explanations of their predictions. Simple decision trees are intrisically understandable because their predictions can be easily linked to the input features.
+
+Model explanations divide along whether they are general and apply to the whole model or are specific and apply to elements of the model. This general/specific distinction applies to understanding the influence of the importance of features generally or their individual specific influence. It also applies to how the general influence of features across all predictions or to a specific prediction.
+
+
+1. Prepare data and train black-box model.
+
+2. Fit and compare an interpretable model, such as a Fast and Frugal decision tree. 
+
+3. Assess feature importance to identify *what* features contribute most to predictions.
+
+4. Describe feature influence to identify *how* features contribute to predictions.
+
+5. Show how features influence specific predictions with a simple local model.
+
+6. Evaluate fairness and assess bias by comparing several fairness metrics.
+
+
+
+**Some useful references:**
+
+Interpretable Machine Learning: A guide for making black box models explainable.
+https://christophm.github.io/interpretable-ml-book/
+
+Biecek, P. (2018). DALEX: Explainers for complex predictive models in R. Journal of Machine Learning Research, 19, 1–5.
+
+Phillips, N. D., Neth, H., Woike, J. K., & Gaissmaier, W. (2017). FFTrees: A toolbox to create, visualize, and evaluate fast-and-frugal decision trees. Judgment and Decision Making, 12(4), 344–368.
+
+Zhang, Q., & Goncalves, B. (2015). Why should I trust you? Explaining the predictions of any classifier. ACM, 4503. doi:10.1145/1235
+
+Rudin, C. (2019). Stop explaining black box machine learning models for high stakes decisions and use interpretable models instead. Nature Machine Intelligence, 1(5), 206–215. Springer Science and Business Media LLC. doi:10.1038/s42256-019-0048-x
+
+
+
+```{r packages}
+
+library(tidyverse)
+library(skimr)
+library(ggforce)
+library(caret) # Tools and common interface to many supervised learning algorithms
+library(patchwork) # For combining multiple plots
+library(plotROC)
+library(pROC)
+
+library(FFTrees) # For simple and intrinsically interpretable models
+library(iml) # For permutation-based feature importance and Shapley local feature value 
+library(pdp) # For pdp and ice plots
+library(lime) # Extracts local interpretable model from complex black box models
+library(fairness) # Extracts several fairness metrics
+
+
+
+set.seed(888) # To ensure consistent results from non-deterministic procedures
+rm(list = ls()) # Removes all variables
+
+```
+
+
+## Read, clean, transform, and visualize data
+
+```{r review_data}
+
+wine.df = read.csv("../data/winequality-red.csv")
+colnames(wine.df) <- make.names(colnames(wine.df), unique = TRUE) # Ensures names are valid and don't contain spaces
+
+skim(wine.df)
+head(wine.df)
+tail(wine.df)
+
+```
+
+
+## Prepare data
+```{r prep_data, echo = TRUE, warning=FALSE, message=FALSE, out.width="60%"}
+
+## Create the class variable
+quality.wine.df = wine.df %>% mutate(goodwine = if_else(quality > 5, "good", "bad")) %>% 
+  mutate(goodwine = as.factor(goodwine))
+
+wine.df = quality.wine.df %>% select(-quality) # Remove numeric indicator of quality
+
+## Create a random sample of rows for training
+inTrain = createDataPartition(wine.df$goodwine, p = 3/4, list = FALSE) 
+
+## Create dataframes of descriptive variables for training and testing
+trainDescr = wine.df %>% slice(inTrain) %>% select(-goodwine)
+testDescr = wine.df %>% slice(-inTrain) %>% select(-goodwine)
+
+trainClass = wine.df %>% slice(inTrain) %>% select(goodwine) %>% as.matrix() %>% as.factor()
+testClass = wine.df %>% slice(-inTrain) %>% select(goodwine) %>% as.matrix() %>% as.factor()
+
+## Trans.mod is a transformation model that is trained and the applied to the data
+Trans.mod = preProcess(trainDescr, method = c("center", "scale")) 
+trainScaled = predict(Trans.mod, trainDescr)
+testScaled = predict(Trans.mod, testDescr)
+
+```
+
+
+## Train models
+```{r train_model}
+
+train.control = trainControl(method = "repeatedcv", 
+                             number = 10, repeats = 3, # number: number of folds
+                             search = "grid", # for tuning hyperparameters
+                             classProbs = TRUE, # return probability of prediction
+                             savePredictions = "final",
+                             summaryFunction = twoClassSummary
+                             )
+
+glm.fit = train(x = trainScaled, y = trainClass,
+   method = 'glm', metric = "ROC",
+   trControl = train.control) 
+
+xgb.fit = train(x = trainScaled, y = trainClass,
+  method = "xgbTree", metric = "ROC",
+  tuneLength = 3, # Depends on number of parameters in algorithm
+  trControl = train.control, scaled = TRUE)
+
+```
+
+
+## Fit an interpretable model: Fast and frugal decision trees
+The concept of the Rashomon set suggests that many models will produce similar outcomes, which suggests that the best approach to helping people understand the output of a machine learning model is to use a simple and intrinsically understandable model. The accuracy of the COMPAS algorithm can be matched by a simple regression model that uses only two features (https://advances.sciencemag.org/content/4/1/eaao5580.short)
+
+The cost function used to train a fast and frugal decision tree penalizes complexity. It also enforces a classification decision at each branch of the tree, which reduces the burden on the users working memory and enables people to produce decisions quickly. 
+
+The FFT package also includes the capability to manually specify a decision tree.
+
+```{r, fft_manual, message=FALSE, echo=TRUE}
+
+wine.df =  read.csv("../data/winequality-red.csv")
+wine.df = wine.df %>% mutate(goodwine = if_else(quality > 5, TRUE, FALSE)) %>%
+   select(-quality)
+
+## Specify model based on domain knowledge
+manual.fit = FFTrees(formula = goodwine ~ .,
+                     data = wine.df, do.rf = TRUE,
+                       my.tree = 'If alcohol < 10.0, predict FALSE.
+                                  If sulphates > 0.7, predict TRUE,
+                                  otherwise predict TRUE'
+                                  )
+plot(manual.fit)
+
+
+## Specify model based on domain knowledge
+fft.fit = FFTrees(formula = goodwine~., data = wine.df[inTrain,], 
+                  max.levels = 4, # Maximum number of tree branches
+                  do.comp = TRUE)
+
+plot(fft.fit)
+
+```
+
+
+
+## Compare interpretable (fft) and sophisticated (xgb) models
+
+```{r auc_fft_xgb, warning=FALSE, message=FALSE, echo=FALSE}
+## Use model to generate predictions
+xgb.pred = predict(xgb.fit, testScaled, type = "prob")
+glm.pred = predict(glm.fit, testScaled, type = "prob")
+fft.pred = predict(fft.fit, wine.df[-inTrain, ], type = "prob")
+
+## Add prediction and observed to test predictors
+predicted.wine.df = quality.wine.df %>% slice(-inTrain) %>% 
+  cbind(glm.pred.good = glm.pred$good) %>% 
+  cbind(xgb.pred.good = xgb.pred$good) %>% 
+  cbind(fft.pred.good = fft.pred[, 2]) %>% 
+  cbind(obs = testClass)
+
+
+## Calculate ROC coordinates and area under curve (AUC)
+glm.roc = roc(predictor = predicted.wine.df$glm.pred, 
+              response = predicted.wine.df$obs, 
+              AUC = TRUE, ci = TRUE)
+
+xgb.roc = roc(predictor = predicted.wine.df$xgb.pred, 
+              response = predicted.wine.df$obs, 
+              AUC = TRUE, ci = TRUE)
+
+fft.roc = roc(predictor = fft.pred[, 2], 
+              response = wine.df[-inTrain, ]$goodwine,
+              AUC = TRUE, ci = TRUE)
+
+## Plot ROC
+xgb_glm.roc.plot = 
+ggplot(data = predicted.wine.df, aes(d = obs, m = glm.pred.good)) + 
+  geom_abline(colour = "grey60") +
+  geom_roc(labels = FALSE, linealpha = .5, pointalpha = .5) + # Labels show the predictor value
+  geom_roc(aes(d = obs, m = xgb.pred.good),
+           labels = FALSE, linealpha = .8, pointalpha = .8) + # Labels show the predictor value
+  geom_roc(aes(d = obs, m = fft.pred.good), color = "blue", labels = FALSE) +
+  annotate("text", x = .5, y = .45, hjust = 0,
+           label = paste("AUC(xbg) =", round(xgb.roc$auc, 2))) +
+  annotate("text", x = .5, y = .375, hjust = 0,
+           label = paste("AUC(glm) =", round(glm.roc$auc, 2))) +
+  annotate("text", x = .5, y = .30, color = "blue", hjust = 0,
+           label = paste("AUC(fft) =", round(fft.roc$auc, 2))) +
+  labs(title = "Prediction of good and bad wines", 
+       subtitle = "Extreme gradient boosting predictions (xgboost)") +
+  coord_equal() +
+  style_roc() 
+xgb_glm.roc.plot 
+
+```
+
+
+## Assess feature importance
+The method used by caret for calculating the variable importance differs for each type of model, but generally corresponds to the normalized beta weight in linear regression.  The feature importance indicates how much each feature influences the model predictions.
+
+
+"The feature importance measure works by calculating the increase of the model’s prediction error after permuting the feature. A feature is “important” if permuting its values increases the model error, because the model relied on the feature for the prediction. A feature is “unimportant” if permuting its values keeps the model error unchanged, because the model ignored the feature for the prediction. "
+
+the iml package also makes it possible to identify those features that influence predictions through their interaction with other features.   
+
+
+```{r caret_feature_imp}
+ 
+  glm.imp = varImp(glm.fit)$importance
+  names(glm.imp) = "glm"
+  glm.imp$variable = rownames(glm.imp)
+  
+  xgb.imp = varImp(xgb.fit)$importance
+  names(xgb.imp) = "xgb"
+  xgb.imp$variable = rownames(xgb.imp)
+  
+  importance.df = full_join(xgb.imp, glm.imp, by = "variable") %>% 
+    pivot_longer(cols = c("xgb", "glm"), names_to = "model", values_to = "importance")
+  
+  ggplot(importance.df, 
+         aes(x = reorder(variable, importance,mean), y = importance, fill = model)) +
+    geom_col(position = "dodge") +
+    labs(x = "Variable", y = "Importance") +
+    coord_flip() +
+    scale_fill_brewer(palette = "Pastel2") +
+    theme_bw() +
+    theme(legend.position = "top")
+
+
+```
+
+
+This section uses the iml package to estimate variable influence through permutation. This package uses a different way of defining models and compiling results.  For clarification see: http://uc-r.github.io/iml-pkg#vip
+
+```{r permuted_feature_imp}
+
+pred <- function(model, newdata)  {
+  results <- as.data.frame(predict(model, newdata, type = "prob")[,2])
+  return(results[[1L]])
+}
+
+glm.predictor <- Predictor$new(
+  model = glm.fit, 
+  data = valid, 
+  y = "testClass", 
+  predict.fun = pred,
+  class = 1
+  )
+
+xgb.predictor <- Predictor$new(
+  model = xgb.fit, 
+  data = testScaled, 
+  y = testClass, 
+  predict.fun = pred,
+  class = 1
+  )
+
+## Estimate variable importance
+glm.importance <- FeatureImp$new(glm.predictor, loss = "ce")
+xgb.importance <- FeatureImp$new(xgb.predictor, loss = "ce")
+
+glm.plot = plot(glm.importance) + labs(title = "glm")
+xgb.plot = plot(xgb.importance) + labs(title = "xgboost")
+
+glm.plot + xgb.plot
+
+
+## Show what variables interact
+glm.interact <- Interaction$new(glm.predictor)
+glm.plot = plot(glm.interact)
+
+xgb.interact <- Interaction$new(xgb.predictor)
+xgb.plot = plot(xgb.interact)
+
+glm.plot + xgb.plot
+
+
+## Show how alcohol interacts
+alcohol.glm.interact = Interaction$new(glm.predictor, feature = "alcohol")
+glm.plot = plot(alcohol.glm.interact) + labs(title = "glm")
+
+alcohol.xgb.interact = Interaction$new(xgb.predictor, feature = "alcohol")
+xgb.plot = plot(alcohol.xgb.interact) + labs(title = "xgboost")
+
+glm.plot + xgb.plot
+
+```
+
+
+## Describe feature response 
+
+Partial dependence plots (PDP) show the aggregagte effect of how different levels of a feature affects predictions. Individual conditional expectation (ICE) plots show the influence of the feature for each prediction. For linear models this is simply a line with the slope indicating the strength of its influence. 
+
+```{r pdp_ice}
+
+glm.pdp = partial(glm.fit, pred.var = "alcohol", plot = TRUE, 
+                  rug = TRUE, # Adds tick marks to indicate min, max and deciles of data
+                  which.class = 2, # Identifies the reference level of the predicted variable
+                  pred.data = testDescr,
+        plot.engine = "ggplot2")
+
+glm.ice = partial(glm.fit, pred.var = "alcohol", ice = TRUE, 
+                which.class = 2, pred.data = testDescr) %>%
+   autoplot(alpha = 0.1, center = FALSE,  train = trainScaled, rug = TRUE)
+ 
+ glm.pdp/glm.ice
+
+
+ 
+xgb.pdp = partial(xgb.fit, pred.var = "alcohol", plot = TRUE, rug = TRUE, 
+        which.class = 2, pred.data = testDescr,
+        plot.engine = "ggplot2")
+
+xgb.ice = partial(xgb.fit, pred.var = "alcohol", ice = TRUE, 
+                   which.class = 2) %>%
+  autoplot(alpha = 0.1, center = FALSE, train = trainScaled, rug = TRUE)
+
+xgb.pdp/xgb.ice
+
+
+```
+
+## Show local variable influence and reponse 
+LIME estimates a linear model based on the points surrounding the instance of interest. The corresponding plots show the features that provide strong evidence for an against the prediction.
+
+```{r lime}
+
+xgb.lime = lime(testScaled, xgb.fit)
+xgb.exp.df = explain(testScaled, xgb.lime, 
+                     n_labels = 2, n_features = 4,
+                     n_permutations = 1000, 
+                     feature_select = "auto")
+
+plot_features(xgb.exp.df, cases = c(1, 2, 3, 4))
+
+ggplot(xgb.exp.df, 
+       aes(label_prob, model_prediction, color = model_r2)) + 
+  geom_point(size = .75)
+
+#ggplot(xgb.exp.df, aes(model_r2)) + geom_histogram()
+
+
+
+```
+
+Shapley values take a different approach and use concepts from game theory to assess the contribution of each variable to model accuracy. Shapley values are estimated by calculating the model accuracy for every combination of features except for the one of interest and then including that feature. The degree to which including this feature improves model accuracy indicates its improvement. This technique has also been applied to estimating the contribution of members of athletic teams. Shapley values can be thought of as how much each feature associated with an instance cooperate to achieve the prediction. The iml package makes it possible to calculate Shapley values.  
+
+```{r shapley}
+
+## Shapley values from iml package
+glm.mod = Predictor$new(glm.fit, data = testScaled)
+xgb.mod = Predictor$new(xgb.fit, data = testScaled)
+
+glm.shapley = Shapley$new(glm.mod, x.interest = testScaled[1, ])
+xgb.shapley = Shapley$new(xgb.mod, x.interest = testScaled[1, ])
+
+glm.shapley.df = glm.shapley$results
+xgb.shapley.df = xgb.shapley$results
+
+glm.shapley.df$model = "glm"
+xgb.shapley.df$model = "xgb"
+
+shapley.df = rbind(glm.shapley.df, xgb.shapley.df)
+
+ggplot(shapley.df %>% filter(class == "good"), 
+       aes(reorder(feature, phi), phi, fill = model))+
+         geom_col(position = "dodge") +
+    labs(x = "Variable", y = "Shapley value") +
+    coord_flip() +
+    scale_fill_brewer(palette = "Pastel2") +
+    theme_bw() +
+    theme(legend.position = "top")
+
+
+```
+
+
+## Plot rsquare on umap space
+
+```{r lime_umap}
+
+```
+
+
+
+## Evaluate fairness of predictions
+Albarghouthi, A., & Vinitsky, S. (2019). Fairness-aware programming. 211–219.
+https://cran.r-project.org/web/packages/fairness/vignettes/fairness.html
+
+The fairness package includes a demonstration dataset: compas. This dataset includes predictions from a machine learning model that tries to predict "Two_yr_Recidivism" the output of the model is included as a numeric value ("predicted") and as a "probability". The analysis assesses the fairness of this algorithm in terms of how it treats people of different ethnicities. 
+
+The fairness package calculates many fairness measures including:
+
+* Accuracy parity (acc_parity)---proportion of correctly predicted instances  
+(TP + TN) / (TP + FP + TN + FN)
+
+* Demographic pairity (dem_parity)---number of positively predicted instances  
+(TP + FP)
+
+* Equalized odds (equal_odds)---number of true positives divided by all positive instances, which is sometimes termed "sensitivity"  
+TP / (TP + FN)
+
+Matthews correlation coefficient---Calculated based on the full confusion matrix in a way that avoids problems of class imbalance  
+(TP×TN-FP×FN)/√((TP+FP)×(TP+FN)×(TN+FP)×(TN+FN))
+
+* Proportional parity (prop_parity)---the proportion of all positively classified instances  
+(TP + FP) / (TP + FP + TN + FN)
+
+* ROC parity (roc_parity)---the area under the ROC curve
+
+* Specificity parity (spec_parity)---number of true negatives divided by all negatives  
+TN / (TN + FP)
+
+
+
+For each of these measures the function requires a dataframe that includes the predictions and the following parameters must be specified:
+
+* outcome	:The column name of the actual outcomes
+
+* group: The groups across which fairness is to be assessed
+
+* probs: The column name or vector of the predicted probabilities. If not defined, argument preds needs to be defined.
+
+* preds: The column name or vector of the predicted outcome (categorical outcome). If not defined, argument probs needs to be defined.
+
+* cutoff: Cutoff to generate predicted outcomes from predicted probabilities. Default set to 0.5. This can be considered as the evidence required for a positive prediction.
+
+* base: Base level for group comparison. The outcome associated with this group are set to 1 and the values of the other groups are scaled.
+
+
+
+```{r fairness}
+
+data("compas")
+compas.df = compas
+
+
+acc.fair = acc_parity(data = compas.df, 
+           outcome = 'Two_yr_Recidivism', 
+           group = 'ethnicity',
+           probs = 'probability', 
+           preds = NULL, 
+           outcome_levels = c('no', 'yes'),
+           cutoff = 0.5, 
+           base = 'Caucasian')
+
+acc.fair$Metric %>% round(2)
+acc.plot = acc.fair$Metric_plot
+
+
+prop.fair = prop_parity(data  = compas.df, 
+            group = "ethnicity",
+            probs = "probability", 
+            preds = NULL,
+            cutoff = 0.5, 
+            base  = "Caucasian")
+
+prop.fair$Metric %>% round(2)
+prop.plot = prop.fair$Metric_plot
+
+
+mcc.fair = mcc_parity(data  = compas.df,
+            outcome = "Two_yr_Recidivism",
+            group = "ethnicity",
+            probs = "probability", 
+            preds = NULL,
+            cutoff = 0.5, 
+            base = "Caucasian")
+
+
+mcc.fair$Metric %>% round(2)
+mcc.plot = mcc.fair$Metric_plot
+
+roc.fair = roc_parity(data = compas.df, 
+           outcome = "Two_yr_Recidivism", 
+           group   = "ethnicity",
+           probs   = "probability", 
+           outcome_levels = c("no","yes"), 
+           base = "Caucasian")
+
+roc.fair$Metric %>% round(2)
+roc.plot = roc.fair$Metric_plot + 
+  labs(y = "AUC Parity")  # There is a bug in the code that labels this graph as "Predictive rate parity"
+
+(acc.plot / prop.plot / roc.plot/ mcc.plot)
+
+```
+
+```{r fairness_roc}
+
+auc_roc.plot = roc.fair$ROCAUC_plot +
+  theme(legend.position = "top")
+
+auc_roc.plot
+
+```
+
+
+
+
+
+

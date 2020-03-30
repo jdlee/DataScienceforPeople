@@ -1,0 +1,577 @@
+---
+title: "Dimensiontality reduction"
+author: "John D. Lee"
+date: "3/24/20"
+output: html_notebook
+---
+
+Dimensionality reduction is a core method of machine learning, typically associated with unsupervised learning.  Dimensionality reduction reduces the number features, or columns, of the dataset. Reasons for dimensionality reduction include:
+
+* Helps visualize high-dimensional data, particularly for cluster analysis 
+* Makes supervised learning and cluster analysis more efficient: Many algorithms fail with high-dimensional data
+* Eliminates multi-collinearity that can make models unstable: PCA produces uncorrelated features
+* Compresses large datasets
+* Identifies hidden commonalities to enable matching without matches
+Drawback: Transforms interpretable features into abstract “principal components” or “dimensions”
+
+As with cluster analysis, many methods of dimensionality reduction been developed. Each makes different assumptions and serves different purposes. A few of the many methods are demonstrated here
+
+* Principal Components Analysis (PCA): A common way of reducing the number of features as a pre-processing step for supervised learning.
+* Multiple Correspondence Analysis (MCA): Similar function to PCA, but applies to categorical variables.
+* Singluar Value Decomposition (SVD): Uses the same algorithm that often underlies PCA, but focusses on how dimensionality reduction applies to both rows and columns.  Commonly used for text analysis with Latent Semantic Analysis (LSA) as well as underpinning many recommendation systems.
+* Non-Nagative Matrix Factorization (NMF): Unlike SVD this approach does not assume normal distribution of the data and conforms better to the type of data involved in recommendations, which are ratings that are positive numbers. Unlike SVD, NMF is able to accommodate missing values.
+* Uniform Manifold Approximation and Projection (UMAP): This approach does not depend on assumptions of linearity that underlie SVD and so is able to better represent the underlying structure of high-dimensional spaces. This technique is frequently used to visualize high dimensional data, but can also be used to pre-process data for supervised learning and cluster analysis.
+
+
+**Some useful references:**
+
+https://www.analyticsvidhya.com/blog/2018/08/dimensionality-reduction-techniques-python/?utm_campaign=News&utm_medium=Community&utm_source=DataCamp.com
+
+https://pair-code.github.io/understanding-umap/
+
+
+
+```{r load_packages, echo=FALSE, warning=FALSE}
+
+library(tidyverse)
+library(tidytext) # For ordering within facets
+library(skimr)
+library(ggforce)
+library(factoextra) # For easy PCA visualization
+library(FactoMineR) # For PCA visualization
+library(patchwork) # For combining multiple plots
+library(recommenderlab)
+library(uwot) # For umap dimensionality reduction
+
+set.seed(888) # To ensure consistent results from non-deterministic procedures
+rm(list = ls()) # Removes all variables
+
+```
+
+
+## Read, clean, transform, and visualize data
+
+```{r review_data}
+
+wine.df = read.csv("../data/winequality-red.csv")
+colnames(wine.df) <- make.names(colnames(wine.df), unique = TRUE) # Ensures names are valid and don't contain spaces
+
+skim(wine.df)
+head(wine.df)
+tail(wine.df)
+
+```
+
+## Principal Components Analysis (PCA) 
+Principal component analysis reduces the features of a dataset (columns) to a set of principal components that can capture most of the information in the original features. The columns are ordered by the contribution and are often plotted in "scree plot" that shows how much of the variance of the original features each principal component captures.
+
+The data for scree plots can be extracted from the pca object manually or they can be plotted with a dedicated function: "fviz_screeplot." The "fviz_screeplot" produces a ggplot graph that can be adjusted like other ggplot objects by adding modifications with a layer, such as the title shown below.
+
+```{r pca_components, warning=FALSE}
+
+## Caculate principal components of wine data
+wine.pca = wine.df %>% select(-quality) %>% 
+  prcomp(scale = TRUE) # As with cluster analysis, scaling is critical
+
+## Screeplot for PCA
+fvizscree.plot = fviz_screeplot(wine.pca) +
+  labs(title = "Principal components of wine")
+
+## Manual screeplot
+var_component.df =  data.frame(var = wine.pca$sdev^2) %>% 
+  rowid_to_column("component") %>% 
+  mutate(percent_var = 100*var/sum(var))
+
+manualscree.plot = ggplot(var_component.df, aes(component, percent_var)) + 
+  geom_col(fill = "steelblue") +
+  geom_line() +
+  geom_point() +
+  scale_x_continuous(breaks = c(1:11)) +
+  labs(title = "Principal components of wine", x = "Component", y = "Percentage of explained variance") +
+  theme_minimal()
+
+fvizscree.plot + manualscree.plot
+
+## Wine space for first four components 
+wine_pc.df = wine.pca$x %>% data.frame()
+
+pc1_2.plot = ggplot(wine_pc.df, aes(PC1, PC2)) + 
+  geom_point(size = .3, alpha = .5) +
+  lims(x = c(-7, 7), y = c(-7, 7)) +
+  coord_fixed() +
+  theme_minimal()
+
+pc3_4.plot = ggplot(wine_pc.df, aes(PC3, PC4)) + 
+  geom_point(size = .3, alpha = .5) +
+  lims(x = c(-7, 7), y = c(-7, 7)) +
+  coord_fixed() +
+  theme_minimal()
+
+pc5_6.plot = ggplot(wine_pc.df, aes(PC5, PC6)) + 
+  geom_point(size = .3, alpha = .5) +
+  lims(x = c(-7, 7), y = c(-7, 7)) +
+  coord_fixed() +
+  theme_minimal()
+
+pc1_2.plot + pc3_4.plot + pc5_6.plot
+
+```
+
+## Explain components based on feature loading
+
+The principal components are weighted averages of the individual features (columns) of the data. The contribution of these features are often visualized with a biplot, which plots data using the first two principle components as axis. It then overlays the variables that make comprise the principal components as vectors. The magnitude of the vectors indicates their influence and their direction shows which principal component they contribute to.
+
+As with the scree plot, there is an dedicated plot function to create biplots"fviz_pca_biplot." The underlying data can also be extracted to create other types of visualizations.
+
+```{r pca_features}
+
+## Biplot of first two components
+fviz_pca_biplot(wine.pca, 
+                alpha.ind = .5, 
+                habillage = wine.df$quality > 6,
+                geom = "point")
+
+
+## Feature loading
+rotation.df = wine.pca$rotation %>% data.frame() %>% 
+  rownames_to_column("feature") %>% 
+  select(feature, PC1, PC2) %>% 
+  pivot_longer(cols = c(PC1, PC2), names_to = "PC")
+
+ggplot(rotation.df, 
+       aes(value, reorder_within(as.factor(feature), abs(value), within = PC))) + 
+  geom_col() +
+  scale_y_reordered() +
+  facet_wrap(~PC, scales = "free") +
+  labs(y = "", title = "Variables orded by importance for each principle component")
+
+```
+
+
+
+## SVD: Example of Food Preference
+PCA typically focuses on the principal components to reduce the number of features. SVD uses the same math, but is use often used to reduce the number of instances of data. 
+
+SVD can reveal differences between people might be associated with differences in food preferences. Specifically, we seek evidence for super-tasters in made up data. Supertasters are people who have more taste buds and then to be more sensitive to bitter foods.  If you don't like coffee and Brussel sprouts you might be a supertaster.
+https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3183330/
+
+For a more design-relevant application of these techniques,  see Gladwell's discussion of how this technique might actually be applied:
+
+"When Moskowitz charted the results, he saw that everyone had a slightly different definition of what a perfect spaghetti sauce tasted like. If you sifted carefully through the data, though, you could find patterns, and Moskowitz learned that most peo- ple’s preferences fell into one of three broad groups: plain, spicy, and extra- chunky, and of those three the last was the most important. Why? Because at the time there was no extra-chunky spaghetti sauce in the supermarket. Over the next decade, that new category proved to be worth hundreds of millions of dollars to Prego. “We all said, ‘Wow!’ ”Monica Wood, who was then the head of market research for Campbell’s, recalls. “Here there was this third segment—people who liked their spaghetti sauce with lots of stuff in it— and it was completely untapped. So in about 1989-90 we launched Prego extra-chunky. It was extraordinarily successful.”"
+Gladwell, M. (2004). *The ketchup conundrum*. New Yorker.
+
+SVD can be thought of as extracting concepts from the data that identify different types of people (e.g., supertasters) and different types of food (e.g., bitter and bland).
+
+### Preference data of people for food
+```{r, message=FALSE}
+
+food.df = read_csv("../data/FoodPreference.csv")
+
+food.long = food.df %>% gather(variable, value, -PID)
+ggplot(food.long, aes(variable, PID, fill = value)) + 
+  geom_tile() +
+  geom_text(aes(label = value), colour = "darkorange") +
+  scale_fill_continuous(high = "#132B43", low = "#56B1F7") +
+  theme_minimal()
+
+```
+
+
+### Singluar values
+Similar to principal components. Using the first principal components retains the information in the data and removes the noise.  Reducing to two components also makes it possible to plot the data in two dimensions.
+
+Here the first singular value is very large compared to the others indicating that it accounts for most of the variance in the data. 
+
+```{r,  message=FALSE}
+
+food.svd = food.df %>% select(-PID) %>% 
+  mutate_all(scale) %>% # As with PCA, the data should be scaled
+  svd(nu = 2, nv = 2)
+
+food.d = as.tibble(food.svd$d)
+food.d$sv = seq(1:8)
+
+ggplot(food.d, aes(sv, value)) + 
+  geom_col()+
+  theme_minimal()
+
+```
+
+
+### u matrix: ObservationXconcept relationship
+In this case it is the personXfood dimension relationships. This graph suggests there are two types of people based on concept V1.
+
+```{r, message=FALSE}
+
+## Person X Concept
+food.u = as.tibble(food.svd$u)
+food.u$PID = as.factor(seq(1:10))
+
+food.u = food.u %>% gather(concept, value, -PID)
+
+ggplot(food.u, aes(concept, PID, fill = value)) + 
+  geom_tile() +
+  theme_minimal()
+
+```
+
+
+### v matrix: VariableXconcept relationship
+In this case it is the food type by food dimension. This graph suggests there are two types of food based on concept V1:  bitter and bland
+
+```{r, message=FALSE}
+
+food.v = as.tibble(food.svd$v)
+
+food.v$food = as.factor(seq(1:8))
+food.v = food.v %>% gather(concept, value, -food)
+foodname = colnames(food.df)[-1]
+food.v$food = foodname
+
+ggplot(food.v, aes(concept, reorder(food, value), fill = value)) + 
+  geom_tile() +
+  theme_minimal()
+
+```
+
+
+### People plotted by most important concepts
+```{r, message=FALSE}
+
+food.df$c1 = food.svd$u[, 1]
+food.df$c2 = food.svd$u[, 2]
+
+ggplot(food.df, aes(c1, c2, label = PID)) +
+  geom_text() +
+  theme_minimal()
+
+```
+
+
+### Foods plotted by most important concepts
+```{r, message=FALSE}
+
+food.v = as.tibble(food.svd$v)
+foodname = colnames(food.df)[c(-1, -10, -11)]
+
+food.v$food = as.factor(seq(1:length(food.v)))
+food.v$food = foodname
+
+ggplot(food.v, aes(V1, V2, label = food)) +
+  geom_text()+
+  theme_minimal()
+
+```
+
+
+### Ordering by person and food concepts
+Re-ordering rows and columns by the U an V concepts seriate the table and matches type of people with types of food. The people at the top of the graph may be supertasters who dislike bitter foods that are on the left of the graph.
+
+In the example of spaghetti sauce, these groups of people and the groups of food might correspond to people who like chunky and smooth spaghetti sauce and the spaghetti sauce varieties that are chunky and smooth.
+
+
+```{r, message=FALSE}
+
+food.long = food.df %>% select(-c2) %>% gather(variable, value, -PID, -c1)
+food.long = left_join(food.long, food.v, by = c("variable" = "food"))
+
+ggplot(food.long, aes(reorder(variable, V1), reorder(PID, c1), fill = value)) + 
+  geom_tile() +
+  geom_text(aes(label = value), colour = "darkorange") +
+  scale_fill_continuous(high = "#132B43", low = "#56B1F7") +
+  labs(x = "Foods", y = "People") +
+  theme_minimal()
+
+```
+
+## Multiple correspondence analysis--PCA for factors
+PCA and SVD operate on numeric variables that are normally distributed. For categorical variables, Multiple Correspondence Analysis, serves a similar function as PCA.
+
+```{r}
+
+## This example from the FactoMine help demonstrates correspondence analysis
+data(poison)
+poison.df <- poison[1:40, 5:15]
+head(poison.df)
+
+poison.mca <- MCA(poison.df, graph=FALSE)
+
+grp <- as.factor(poison.df[, "Vomiting"])
+
+fviz_mca_biplot(poison.mca, repel = TRUE, 
+ habillage = grp, 
+ addEllipses = TRUE, ellipse.level = 0.95)
+
+```
+
+## Non-negative Matrix Factorization (NMF) and recommendations 
+SVD can identify types of people and types of products to identify what products might appeal to people. Collaborative filtering makes it possible to make recommendations based on other peoples ratings.  The movies that other people like who like movies that you like are likely to be movies that you like. 
+
+Such datasets of violate the assumptions of normality that underly PCA and SVD. Also, these datasets often have many missing varaibles that can be problematic for SVD algorithms. Non-negative Matrix Factorization (NMF) addresses these limitations and provide useful basis for collaborative filtering and recommendation engines.
+
+https://github.com/mhahsler/recommenderlab
+https://cran.r-project.org/web/packages/recommenderlab/vignettes/recommenderlab.pdf
+https://towardsdatascience.com/market-basket-analysis-with-recommenderlab-5e8bdc0de236
+
+
+```{r nmf_taste}
+
+## Data in a dataframe need to be converted into ratings data structure  
+food.long.df = food.df %>% select(-c1, -c2) %>% 
+  pivot_longer(-PID, names_to = "food", values_to = "rating") %>% 
+  select(PID, food, rating) #R equires input as triplets of user/item/rating as rows 
+
+food.rate = food.long.df %>%  as.data.frame() %>% # Convert to matrix
+  as("realRatingMatrix") # Convert to recommenderlab class 'binaryRatingsMatrix' 
+
+
+## Identify similar people and similar food
+similar_people = similarity(food.rate[1:10, ], method = "cosine", which = "users")
+similar_people
+similar_food = similarity(food.rate[1:10], method = "cosine", which = "items")
+
+
+## Train recommendation model
+# Options include LIBMF,POPULAR, UBCF
+train_food.rate = food.rate[3:7] # Select training data
+
+ub.food.rec = Recommender(train_food.rate, method="UBCF",
+                       param=list(normalize = "Z-score", method="Cosine", nn=3))
+
+mf.food.rec = Recommender(train_food.rate, method = "LIBMF")
+
+pop.food.rec = Recommender(train_food.rate, method = "POPULAR")
+
+## Predict ratings and top 
+ratings.pred <- predict(mf.food.rec, food.rate[1], type = "ratings")
+as(ratings.pred, "list")
+
+top.pred <- predict(mf.food.rec, food.rate[8], n = 3, type = "topNList")
+as(top.pred, "list")
+
+## Get prediction for new data
+newPID.df = data.frame(PID = "P12", food = "Brocolli", rating = 4) 
+
+newPID.rate = food.long.df %>% 
+  select(food) %>% # Select item descriptions from original dataset
+  unique() %>% 
+  left_join(newPID.df) %>% 
+  fill(PID) %>% 
+  select(PID, food, rating) %>% 
+  data.frame() %>% as("realRatingMatrix")
+
+
+top3.pred <- predict(ub.food.rec, newPID.rate, n= 3, type = "topNList")
+as(top3.pred, "list")
+
+```
+
+```{r nmf_movies}
+
+data("MovieLense")
+movie100.rate = MovieLense[rowCounts(MovieLense) > 100,]
+movietrain.rate = movie100.rate[1:100]
+
+movie.rec = Recommender(movietrain.rate, method = "LIBMF")
+
+## create top-N recommendations for withheld users
+top.pred = predict(movie.rec, movie100.rate[101:102], n = 4)
+as(top.pred, "list")
+
+
+## Predict ratings for withheld users
+rate.pred = predict(movie.rec, movie100.rate[101:102], type = "ratings")
+prediction.matrix = as(rate.pred, "matrix")
+
+```
+
+
+
+
+## UMAP for non-linear dimensionality reduction
+UMAP (Uniform Manifold Approximation and Projection) generates a non-linear dimensionality reduction that does not rely on the assumptions of linearity of PCA. 
+
+
+```{r umap_hyperparameters}
+
+## Hyper parameters affect dimensionality reduction
+
+## Calculates UMAP dimensions for 16 combinations of important UMAP parameters
+# umap default  min_dist = 0.01, n_neighbors = 15
+umap_sensitivity <- function(data.df, y = NULL, y_weight = .5) {
+  umap.df = data.frame(matrix(ncol = 4, nrow = 0))
+  y.df = data.df[, y]
+  data.df = data.df[, !names(data.df) %in% y]
+  for (nnn in c(5, 10, 15, 20)) {
+    for(dist in c(.001, .005, .01, .05)) {
+      temp = data.df %>% do(as_tibble(umap(.,
+                                           n_neighbors = nnn, min_dist = dist,
+                                           y = y.df, target_weight = y_weight)))
+      temp$nnn = nnn
+      temp$dist = dist
+      umap.df = rbind(umap.df, temp)
+    }
+  }
+  data_umap.df = cbind(y.df, umap.df)
+  names(data_umap.df)[1] = y
+  return = data_umap.df
+}
+
+
+## Scale data
+scaled.wine.df = wine.df %>% 
+  mutate_at(vars(-quality), scale)
+
+## Plot UMAP for a range of hyperparameters
+# A value of 0.0 weights only the data, and 1.0 weights only the target
+multi_wine_umap.df = umap_sensitivity(scaled.wine.df, y = "quality", y_weight = 0)
+  
+
+ggplot(multi_wine_umap.df,
+       aes(x = V1, y = V2, colour = quality)) +
+  geom_point(size = .5) +
+  facet_grid(nnn~dist) +
+  coord_fixed() +
+  scale_color_viridis_c(option = "magma") +
+  theme_minimal()
+  
+
+```
+
+```{r umap_pca}
+
+## Plot for "best" hyperparameter
+wine_umap.df = umap(scaled.wine.df %>% select(-quality),
+     n_neighbors = 10, min_dist = .01) %>% 
+  as_tibble() %>% 
+  cbind(wine.df) 
+
+umap.plot = ggplot(wine_umap.df, aes(V1, V2, colour = quality)) + 
+  geom_point(size = 1.2, alpha = .95) +
+  coord_fixed() +
+  scale_color_viridis_c(option = "magma") +
+  labs(title = "UMAP components of wine") +
+  theme_minimal()
+
+
+## PCA compared to UMAP
+wine.pca = wine.df %>% select(-quality) %>% 
+  prcomp(scale = TRUE) # As with cluster analysis, scaling is critical
+
+wine_pc.df = wine.pca$x %>% data.frame()
+wine_pc.df = cbind(quality =wine.df$quality, wine_pc.df)
+  
+pca.plot = ggplot(wine_pc.df, aes(PC1, PC2, colour = quality)) + 
+  geom_point(size = 1.2, alpha = .95) +
+  coord_fixed() +
+  scale_color_viridis_c(option = "magma") +
+  labs(title = "Principal components of wine") +
+  theme_minimal()
+
+
+## Combined PCA and UMAP plot
+umap.plot + pca.plot + 
+  plot_layout(guides = "collect") & theme(legend.position = "bottom")
+
+```
+
+
+## Semi-supervised learning with UMAP
+Although the distinction between supervised and unsupervised learning is often presented as a clear division. This division blurs with several "semi-supervised" learning techniques.  These techniques use labeled cases to complement the unsupervised process.  UMAP can work in this way by using an outcome variable contribute the dimensionality reduction.  The figure below includes wine quality.
+
+
+```{r umap_semisupervised}
+
+## Plot for "best" hyperparameter
+umap.df = umap(scaled.wine.df %>% select(-quality),
+     n_neighbors = 10, min_dist = .01,
+     n_components = 2,
+     y = wine.df$quality, target_weight = .8) %>% 
+  as_tibble()
+
+wine_umap.df = cbind(wine.df, umap.df)
+
+umap.plot = ggplot(wine_umap.df, aes(V1, V2, colour = quality)) + 
+  geom_point(size = 1.2, alpha = .95) +
+  coord_fixed() +
+  scale_color_viridis_c(option = "magma") +
+  labs(title = "Semisupervised UMAP components") +
+  theme_minimal()
+
+umap.plot
+
+```
+
+## Translating new data to UMAP space
+Most functions in used for data analysis allow you to use "summary", "plot", and "predict".  Predict takes new data and applies the model to transform it to a prediction, or in the case of PCA, projects the point into the PCA dimensions. With the uwot implementation of UMAP you need to use a different command: "umap_transform"
+
+```{r umap_newdata}
+
+wine.umap = umap(scaled.wine.df %>% select(-quality),
+     n_neighbors = 10, min_dist = .01,
+     ret_model = TRUE )
+
+newdata = scaled.wine.df[1,]%>% select(-quality) 
+newdata$residual.sugar = 2 # two standard deviations from mean
+newdata$alcohol = 2 # two standard deviations from mean
+
+new.df = umap_transform(newdata, wine.umap)%>% 
+  as_tibble()
+
+
+umap.plot = ggplot(wine_umap.df) + 
+  geom_point(aes(V1, V2, colour = quality), size = 1.2, alpha = .95) +
+  geom_point(data =new.df, aes(V1, V2), size = 5) +
+  geom_label_repel(data =new.df, aes(V1, V2), label = "new wine", 
+                   nudge_y = -1.75, nudge_x = .95) +
+  coord_fixed() +
+  scale_color_viridis_c(option = "magma") +
+  labs(title = "UMAP components of wine") +
+  theme_minimal()
+umap.plot
+
+```
+
+
+## Estimate cluster membership with UMAP-transformed data
+UMAP reduces the dimensionality of the data by combining the number of columns. It can create a low-dimensional representation where similar cases are near each other. When using UMAP to pre-process data for supervised learning or cluster analysis more than two dimensions are typically retaining.  Just as with PCA, including more dimensions with UMAP will retain more information from the original data.
+
+```{r umapcluster}
+
+
+## More components capture more information
+umap6.df = umap(scaled.wine.df, 20, min_dist = .01, n_components = 6) %>% scale()
+
+## Cluster based on UMAP data
+library(clValid)
+internal.cl = clValid(umap6.df, 
+                  nClust = 2:10, 
+                  clMethods = c("kmeans", "pam", "agnes", "diana"),
+                  maxitems = 1700,
+                  validation = "internal")
+
+## View internal metrics   
+summary(internal.cl)
+plot(internal.cl)
+
+
+
+## UMAP and kmeans
+umap.wine.kmean = eclust(umap.df, 
+       FUNcluster = "kmeans", 
+       k = 5, graph = FALSE,
+       seed = 888)
+  
+
+wine_kmean_umap.df = cbind(wine_umap.df, cluster = as.factor(umap.wine.kmean$cluster))
+
+km_umap.plot = 
+  ggplot(wine_kmean_umap.df, aes(V1, V2, colour = cluster)) + 
+  geom_point(size = 1) + 
+  labs(title = "Kmeans clustering based on UMAP transformed data", x = "", y = "") +
+  theme_bw() + 
+  theme(legend.position = "none") 
+
+km_umap.plot
+
+```

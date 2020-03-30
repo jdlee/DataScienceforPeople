@@ -50,7 +50,7 @@ Rudin, C. (2019). Stop explaining black box machine learning models for high sta
 
 
 
-```{r packages}
+```{r load_packages}
 
 library(tidyverse)
 library(skimr)
@@ -61,12 +61,17 @@ library(plotROC)
 library(pROC)
 
 library(FFTrees) # For simple and intrinsically interpretable models
+
 library(iml) # For permutation-based feature importance and Shapley local feature value 
 library(pdp) # For pdp and ice plots
 library(lime) # Extracts local interpretable model from complex black box models
+library(shapper) # For SHAP (SHapley Additive exPlanations) a game theoretic explanation
 library(fairness) # Extracts several fairness metrics
 
-
+## Needed to install FFTrees from github
+# library(devtools)
+# install_github("ndphillips/FFTrees")
+library(FFTrees)
 
 set.seed(888) # To ensure consistent results from non-deterministic procedures
 rm(list = ls()) # Removes all variables
@@ -152,13 +157,13 @@ wine.df = wine.df %>% mutate(goodwine = if_else(quality > 5, TRUE, FALSE)) %>%
    select(-quality)
 
 ## Specify model based on domain knowledge
-manual.fit = FFTrees(formula = goodwine ~ .,
-                     data = wine.df, do.rf = TRUE,
-                       my.tree = 'If alcohol < 10.0, predict FALSE.
-                                  If sulphates > 0.7, predict TRUE,
-                                  otherwise predict TRUE'
-                                  )
-plot(manual.fit)
+# manual.fit = FFTrees(formula = goodwine ~ .,
+#                      data = wine.df, do.rf = TRUE,
+#                        my.tree = 'If alcohol < 10.0, predict FALSE.
+#                                   If sulphates > 0.7, predict TRUE,
+#                                   Otherwise predict TRUE'
+#                                   )
+# plot(manual.fit)
 
 
 ## Specify model based on domain knowledge
@@ -259,7 +264,11 @@ the iml package also makes it possible to identify those features that influence
 ```
 
 
-This section uses the iml package to estimate variable influence through permutation. This package uses a different way of defining models and compiling results.  For clarification see: http://uc-r.github.io/iml-pkg#vip
+This section uses the iml package to estimate variable influence through permutation. This method can also estimate how variables combine to influence the prediction. When the combined influence between pairs of variables excedes what one would expect from the variables individually this is defined as an interaction. Similar to the variable influence plot, an interaction plot shows how strongly variables contribute to the outcome through their interactions with all the other variables.  Another plot shows the most influential of these interactions.
+
+This package uses a different way of defining models and compiling results that has an object-oriented syntax similar to Pythod. For clarification see: http://uc-r.github.io/iml-pkg#vip
+
+
 
 ```{r permuted_feature_imp}
 
@@ -270,8 +279,8 @@ pred <- function(model, newdata)  {
 
 glm.predictor <- Predictor$new(
   model = glm.fit, 
-  data = valid, 
-  y = "testClass", 
+  data = testScaled, 
+  y = testClass, 
   predict.fun = pred,
   class = 1
   )
@@ -283,6 +292,8 @@ xgb.predictor <- Predictor$new(
   predict.fun = pred,
   class = 1
   )
+
+glm.predictor
 
 ## Estimate variable importance
 glm.importance <- FeatureImp$new(glm.predictor, loss = "ce")
@@ -322,6 +333,7 @@ Partial dependence plots (PDP) show the aggregagte effect of how different level
 
 ```{r pdp_ice}
 
+## xgboost PDP and ICE
 glm.pdp = partial(glm.fit, pred.var = "alcohol", plot = TRUE, 
                   rug = TRUE, # Adds tick marks to indicate min, max and deciles of data
                   which.class = 2, # Identifies the reference level of the predicted variable
@@ -332,10 +344,10 @@ glm.ice = partial(glm.fit, pred.var = "alcohol", ice = TRUE,
                 which.class = 2, pred.data = testDescr) %>%
    autoplot(alpha = 0.1, center = FALSE,  train = trainScaled, rug = TRUE)
  
- glm.pdp/glm.ice
+ glm.pdp + glm.ice
 
 
- 
+## xgboost PDP and ICE
 xgb.pdp = partial(xgb.fit, pred.var = "alcohol", plot = TRUE, rug = TRUE, 
         which.class = 2, pred.data = testDescr,
         plot.engine = "ggplot2")
@@ -344,33 +356,37 @@ xgb.ice = partial(xgb.fit, pred.var = "alcohol", ice = TRUE,
                    which.class = 2) %>%
   autoplot(alpha = 0.1, center = FALSE, train = trainScaled, rug = TRUE)
 
-xgb.pdp/xgb.ice
+xgb.center.ice = partial(xgb.fit, pred.var = "alcohol", ice = TRUE,
+                   which.class = 2) %>%
+  autoplot(alpha = 0.1, center = TRUE, train = trainScaled, rug = TRUE)
 
+xgb.pdp + xgb.ice + xgb.center.ice
 
 ```
 
-## Show local variable influence and reponse 
-LIME estimates a linear model based on the points surrounding the instance of interest. The corresponding plots show the features that provide strong evidence for an against the prediction.
+## Show local variable influence and response 
+LIME estimates a linear model based on the points surrounding the instance of interest. The corresponding plots show the features that provide strong evidence for an against the prediction. The plot from the LIME analysis shows four cases.  Each is a wine and the blue bars indicate evidence that the wine is good and the red bars indicate evidence that the wine is bad. The length of the bars is proportional to the influence of the corresponding variable. The notation at the top of the graph indicates the probability that the wine is good and the fit of the local model: the explanation fit. The explanation fit is the fit of the local model to the points surrounding the case of interest. A low value indicates that the local linear model provides a poor explanation of the case.
+
+
 
 ```{r lime}
 
 xgb.lime = lime(testScaled, xgb.fit)
 xgb.exp.df = explain(testScaled, xgb.lime, 
                      n_labels = 2, n_features = 4,
-                     n_permutations = 1000, 
+                     n_permutations = 30, 
                      feature_select = "auto")
-
-plot_features(xgb.exp.df, cases = c(1, 2, 3, 4))
 
 ggplot(xgb.exp.df, 
        aes(label_prob, model_prediction, color = model_r2)) + 
   geom_point(size = .75)
 
-#ggplot(xgb.exp.df, aes(model_r2)) + geom_histogram()
+ggplot(xgb.exp.df, aes(model_r2)) + geom_histogram()
 
-
+plot_features(xgb.exp.df, cases = c(1, 2, 3, 4))
 
 ```
+
 
 Shapley values take a different approach and use concepts from game theory to assess the contribution of each variable to model accuracy. Shapley values are estimated by calculating the model accuracy for every combination of features except for the one of interest and then including that feature. The degree to which including this feature improves model accuracy indicates its improvement. This technique has also been applied to estimating the contribution of members of athletic teams. Shapley values can be thought of as how much each feature associated with an instance cooperate to achieve the prediction. The iml package makes it possible to calculate Shapley values.  
 
@@ -400,21 +416,17 @@ ggplot(shapley.df %>% filter(class == "good"),
     theme_bw() +
     theme(legend.position = "top")
 
-
 ```
-
-
-## Plot rsquare on umap space
-
-```{r lime_umap}
-
-```
-
 
 
 ## Evaluate fairness of predictions
-Albarghouthi, A., & Vinitsky, S. (2019). Fairness-aware programming. 211–219.
-https://cran.r-project.org/web/packages/fairness/vignettes/fairness.html
+
+A review of fairness in machine learning identified three definitions of fairness (Corbett-Davies, S., & Goel, S., 2018):
+1. Anti-classification demands that protected attributes, such as race, gender, and their proxies, are not used explicitly used to make decisions.
+
+2. Classification parity demands that common measures of predictive performance (e.g., false positive and false negative rates) are equal across groups defined by protected attributes.
+
+3. Calibration demands that conditional on risk estimates, outcomes are independent of protected attributes.
 
 The fairness package includes a demonstration dataset: compas. This dataset includes predictions from a machine learning model that tries to predict "Two_yr_Recidivism" the output of the model is included as a numeric value ("predicted") and as a "probability". The analysis assesses the fairness of this algorithm in terms of how it treats people of different ethnicities. 
 
@@ -456,13 +468,17 @@ For each of these measures the function requires a dataframe that includes the p
 
 * base: Base level for group comparison. The outcome associated with this group are set to 1 and the values of the other groups are scaled.
 
+**Some useful references:**
+Corbett-Davies, S., & Goel, S. (2018). The Measure and Mismeasure of Fairness: A Critical Review of Fair Machine Learning. arXiv preprint arXiv:1808.00023. Retrieved from http://arxiv.org/abs/1808.00023
+
+Albarghouthi, A., & Vinitsky, S. (2019). Fairness-aware programming. 211–219.
+https://cran.r-project.org/web/packages/fairness/vignettes/fairness.html
 
 
 ```{r fairness}
 
 data("compas")
 compas.df = compas
-
 
 acc.fair = acc_parity(data = compas.df, 
            outcome = 'Two_yr_Recidivism', 
@@ -504,7 +520,7 @@ roc.fair = roc_parity(data = compas.df,
            outcome = "Two_yr_Recidivism", 
            group   = "ethnicity",
            probs   = "probability", 
-           outcome_levels = c("no","yes"), 
+           outcome_levels = c("no", "yes"), 
            base = "Caucasian")
 
 roc.fair$Metric %>% round(2)
@@ -523,9 +539,6 @@ auc_roc.plot = roc.fair$ROCAUC_plot +
 auc_roc.plot
 
 ```
-
-
-
 
 
 
